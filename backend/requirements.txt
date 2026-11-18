@@ -1,6 +1,7 @@
 fastapi==0.162.6
 uvicorn==0.54.0
 Authlib==1.9.5
+itsdangerous>=2.2,<3
 pydantic==2.14.3
 starlette==1.10.0
 python-multipart==0.0.33
