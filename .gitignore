@@ -1,0 +1,94 @@
+.env*
+!.env.example
+.venv/
+.venv311/
+venv/
+env/
+node_modules/
+.vscode/
+
+# Python caches and generated artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.hypothesis/
+.ipynb_checkpoints/
+__pypackages__/
+.eggs/
+*.egg
+*.egg-info/
+pip-wheel-metadata/
+.tox/
+.nox/
+
+# Coverage reports
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+*.py,cover
+
+# Local databases and database backups
+*.db
+*.db.backup*
+*.db-*
+*.db.bak*
+*.sqlite
+*.sqlite3
+*.sqlite.backup*
+*.sqlite-*
+*.sqlite.bak*
+*.sqlite3.backup*
+*.sqlite3-*
+*.sqlite3.bak*
+
+# Local secrets
+**/.streamlit/secrets.toml
+**/secrets.toml
+credentials.json
+token.json
+service-account*.json
+service_account*.json
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+secret.yaml
+secrets.yaml
+secret.yml
+secrets.yml
+
+# Logs and temporary files
+*.log
+*.temp
+logs/
+*.tmp
+temp/
+tmp/
+
+# Generated frontend builds
+dist/
+build/
+/frontend/dist/
+/frontend/build/
+/public-site/dist/
+/public-site/build/
+
+# Backup snapshots and copied source trees
+**/*backup*/
+*.backup*
+
+# Internal phase planning and provider research reports
+/PHASE*.md
+
+# Separate public website repository
+/public-site/

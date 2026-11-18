@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" role="img" aria-labelledby="title">
+  <title id="title">Nuts category illustration</title>
+  <rect width="320" height="180" rx="18" fill="#f3e9e1"/>
+  <ellipse cx="132" cy="97" rx="24" ry="36" transform="rotate(-28 132 97)" fill="#b8784e"/>
+  <ellipse cx="177" cy="99" rx="24" ry="34" transform="rotate(25 177 99)" fill="#d19b60"/>
+  <path d="M132 64c12 21 12 47 0 67m45-64c-12 20-12 44 0 63" fill="none" stroke="#815438" stroke-width="4"/>
+</svg>

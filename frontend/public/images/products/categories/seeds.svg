@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" role="img" aria-labelledby="title">
+  <title id="title">Seeds category illustration</title>
+  <rect width="320" height="180" rx="18" fill="#eaf3e9"/>
+  <path d="M160 139V75m0 31c-20-22-40-18-43-15 6 22 22 31 43 29m0-16c20-22 40-18 43-15-6 22-22 31-43 29" fill="none" stroke="#55875f" stroke-width="6" stroke-linecap="round"/>
+  <ellipse cx="160" cy="61" rx="12" ry="20" fill="#9abc72"/>
+</svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" role="img" aria-labelledby="title">
+  <title id="title">Snacks category illustration</title>
+  <rect width="320" height="180" rx="18" fill="#fcebe4"/>
+  <path d="M125 58h70l-7 85h-56z" fill="#e89a70"/>
+  <path d="m125 58 9-15h52l9 15" fill="#f4c18f"/>
+  <path d="M143 91c7-8 14-8 21 0s14 8 21 0" fill="none" stroke="#fff0d4" stroke-width="6" stroke-linecap="round"/>
+</svg>

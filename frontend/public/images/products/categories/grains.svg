@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" role="img" aria-labelledby="title">
+  <title id="title">Grains category illustration</title>
+  <rect width="320" height="180" rx="18" fill="#f7f0dd"/>
+  <path d="M159 142V52m0 31c-17-20-35-16-36-14 3 19 18 27 36 26m0 13c17-20 35-16 36-14-3 19-18 27-36 26" fill="none" stroke="#a9843f" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M159 63c-12-16-6-29 1-38 7 11 13 24-1 38z" fill="#d9b66d"/>
+</svg>

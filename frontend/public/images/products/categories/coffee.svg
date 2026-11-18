@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" role="img" aria-labelledby="title">
+  <title id="title">Coffee category illustration</title>
+  <rect width="320" height="180" rx="18" fill="#f4e9df"/>
+  <path d="M111 72h83v49a22 22 0 0 1-22 22h-39a22 22 0 0 1-22-22z" fill="#bc7951"/>
+  <path d="M194 83h15a16 16 0 0 1 0 32h-17" fill="none" stroke="#8c5639" stroke-width="9"/>
+  <path d="M132 58c-10-10 10-13 0-23m28 23c-10-10 10-13 0-23" fill="none" stroke="#94684e" stroke-width="5" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" role="img" aria-labelledby="title">
+  <title id="title">Cooking oil category illustration</title>
+  <rect width="320" height="180" rx="18" fill="#eef3df"/>
+  <path d="M145 47h30v18l15 13v63h-60V78l15-13z" fill="#b6c66b"/>
+  <path d="M145 47h30v13h-30z" fill="#798f42"/>
+  <path d="M145 97h30m-30 15h30" stroke="#f4f7e8" stroke-width="5" stroke-linecap="round"/>
+</svg>

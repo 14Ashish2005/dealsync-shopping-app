@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" role="img" aria-labelledby="title">
+  <title id="title">Honey category illustration</title>
+  <rect width="320" height="180" rx="18" fill="#fff3d8"/>
+  <path d="M137 53h46v16l13 15v55h-72V84l13-15z" fill="#e6ad3e"/>
+  <path d="M137 53h46m-46 17h46m-31-17v17" stroke="#a87421" stroke-width="6"/>
+  <path d="M146 104h28" stroke="#fff1bc" stroke-width="6" stroke-linecap="round"/>
+</svg>

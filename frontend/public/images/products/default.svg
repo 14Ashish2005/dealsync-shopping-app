@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" role="img" aria-labelledby="title">
+  <title id="title">Product illustration</title>
+  <rect width="320" height="180" rx="18" fill="#f1f0ff"/>
+  <rect x="112" y="36" width="96" height="108" rx="14" fill="#dedbff"/>
+  <path d="M145 70h30m-30 20h30m-30 20h20" stroke="#7770cf" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="160" cy="90" r="67" fill="none" stroke="#bdb8f5" stroke-width="2" stroke-dasharray="4 8"/>
+</svg>
