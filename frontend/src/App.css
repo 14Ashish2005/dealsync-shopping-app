@@ -132,6 +132,10 @@
 .chat-form{display:flex;gap:7px;border:1px solid #e9ecf4;border-radius:8px;padding:5px 6px 5px 10px;margin-top:12px}
 .chat-form button{width:27px;height:27px;border:0;border-radius:7px;background:#655ddc;color:#fff;font-size:16px;cursor:pointer}
 .chat-form button:disabled{opacity:.55;cursor:wait}
+.chat-form button:focus-visible{outline:2px solid #8279ed;outline-offset:2px}
+.chat-form .chat-voice-button.is-listening{background:#c84e63;box-shadow:0 0 0 3px #c84e6333}
+.voice-input-feedback{margin:8px 0 0;color:#655ddc;font-size:10px;line-height:1.5}
+.voice-input-feedback.error{color:#b33d4b}
 .chat-disclaimer{text-align:center;font-size:8px;color:#aab2bf;margin-top:8px}
 .cart-strip{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #edf0f6;border-radius:11px;margin-top:22px;padding:13px 16px}
 .cart-strip-icon{width:35px;height:35px;border-radius:9px;background:#f0efff;display:grid;place-items:center}

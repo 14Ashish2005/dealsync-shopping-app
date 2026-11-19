@@ -1052,6 +1052,8 @@ function App() {
 
   const [isChatLoading, setIsChatLoading] = useState(false)
   const [chatError, setChatError] = useState('')
+  const [isVoiceListening, setIsVoiceListening] = useState(false)
+  const [voiceInputError, setVoiceInputError] = useState('')
   const [apiProducts, setApiProducts] = useState([])
   const [apiCategories, setApiCategories] = useState([])
   const [productsLoading, setProductsLoading] = useState(true)
@@ -1099,6 +1101,8 @@ function App() {
   const imagePreviewUrlRef = useRef('')
   const imageSearchInFlightRef = useRef(false)
   const comparisonInFlightRef = useRef(false)
+  const voiceRecognitionRef = useRef(null)
+  const voiceInputBaseRef = useRef('')
   const productSearchInputRef = useRef(null)
   const pendingProductSearchFocusRef = useRef(false)
   const offerSearchPanelRef = useRef(null)
@@ -1125,6 +1129,9 @@ function App() {
         URL.revokeObjectURL(imagePreviewUrlRef.current)
         imagePreviewUrlRef.current = ''
       }
+      const activeRecognition = voiceRecognitionRef.current
+      voiceRecognitionRef.current = null
+      activeRecognition?.abort()
     }
   }, [])
 
@@ -2288,6 +2295,82 @@ function App() {
     }
   }
 
+  function toggleVoiceInput() {
+    setVoiceInputError('')
+    const activeRecognition = voiceRecognitionRef.current
+    if (activeRecognition) {
+      activeRecognition.stop()
+      return
+    }
+
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setVoiceInputError('Voice input is not supported in this browser.')
+      return
+    }
+
+    const recognition = new SpeechRecognition()
+    recognition.lang = navigator.language || 'en-US'
+    recognition.interimResults = false
+    recognition.continuous = false
+    voiceInputBaseRef.current = chatInput
+
+    recognition.onstart = () => setIsVoiceListening(true)
+    recognition.onresult = (event) => {
+      const transcriptParts = []
+      for (let index = 0; index < event.results.length; index += 1) {
+        const result = event.results[index]
+        if (result.isFinal && result[0]?.transcript) {
+          transcriptParts.push(result[0].transcript.trim())
+        }
+      }
+
+      const transcript = transcriptParts.join(' ').trim()
+      if (!transcript) return
+
+      const baseText = voiceInputBaseRef.current
+      const separator = baseText && !/\s$/.test(baseText) ? ' ' : ''
+      setChatInput(`${baseText}${separator}${transcript}`)
+    }
+    recognition.onerror = (event) => {
+      const errorMessages = {
+        'not-allowed':
+          'Microphone access was denied. Allow microphone access and try again.',
+        'service-not-allowed':
+          'Microphone access was denied. Allow microphone access and try again.',
+        'audio-capture':
+          'No microphone was found. Check your microphone and try again.',
+        'no-speech': 'No speech was detected. Try again.',
+        network: 'Voice recognition could not connect. Check your connection and try again.',
+      }
+      if (event.error !== 'aborted') {
+        setVoiceInputError(
+          errorMessages[event.error] || 'Voice input failed. Please try again.',
+        )
+      }
+    }
+    recognition.onend = () => {
+      if (voiceRecognitionRef.current === recognition) {
+        voiceRecognitionRef.current = null
+        setIsVoiceListening(false)
+      }
+    }
+
+    voiceRecognitionRef.current = recognition
+    try {
+      recognition.start()
+    } catch (error) {
+      voiceRecognitionRef.current = null
+      setIsVoiceListening(false)
+      setVoiceInputError(
+        error instanceof Error && error.name === 'NotAllowedError'
+          ? 'Microphone access was denied. Allow microphone access and try again.'
+          : 'Voice input could not start. Check microphone permissions and try again.',
+      )
+    }
+  }
+
   function confirmCartPreview(token) {
     void sendMessage(null, {
       text: 'Confirm adding eligible products to my cart',
@@ -3196,8 +3279,55 @@ function App() {
                     aria-label="Message the shopping assistant"
                     disabled={isChatLoading}
                   />
-                  <button type="submit" aria-label="Send message" disabled={isChatLoading}>?</button>
+                  <button
+                    className={`chat-voice-button${isVoiceListening ? ' is-listening' : ''}`}
+                    type="button"
+                    aria-label={isVoiceListening ? 'Stop voice input' : 'Start voice input'}
+                    aria-pressed={isVoiceListening}
+                    title="Voice input"
+                    onClick={toggleVoiceInput}
+                  >
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      width="16"
+                      height="16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="9" y="2" width="6" height="12" rx="3" />
+                      <path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4m-4 0h8" />
+                    </svg>
+                  </button>
+                  <button type="submit" aria-label="Send message" disabled={isChatLoading}>
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      width="16"
+                      height="16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <circle cx="11" cy="11" r="7" />
+                      <path d="m20 20-4-4" />
+                    </svg>
+                  </button>
                 </form>
+                {voiceInputError ? (
+                  <p className="voice-input-feedback error" role="alert">
+                    {voiceInputError}
+                  </p>
+                ) : isVoiceListening ? (
+                  <p className="voice-input-feedback" role="status">
+                    Listening... Speak now.
+                  </p>
+                ) : null}
                 <p className="demo-note">AI responses are generated by the DealSync shopping assistant.</p>
               </section>
             )}
