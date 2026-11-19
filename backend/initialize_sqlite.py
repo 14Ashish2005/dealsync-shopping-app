@@ -24,6 +24,7 @@ from backend.migrations import (
     v002_product_images,
     v003_currency_metadata,
     v004_product_specifications,
+    v005_demo_orders,
 )
 from setup_db import create_database
 
@@ -34,6 +35,7 @@ MIGRATION_ORDER = (
     "v002_product_images",
     "v003_currency_metadata",
     "v004_product_specifications",
+    "v005_demo_orders",
 )
 
 _BUSINESS_COLUMNS = {
@@ -43,7 +45,8 @@ _BUSINESS_COLUMNS = {
     "reviews": {"id", "product_id", "rating", "reviewer_name", "review_text"},
     "orders": {
         "id", "product_id", "product_name", "price", "ordered_at", "owner_id",
-        "status", "currency",
+        "status", "currency", "order_reference", "quantity", "total_minor",
+        "order_currency",
     },
     "cart_items": {"owner_id", "product_id", "quantity"},
     "cart_confirmation_outcomes": {
@@ -340,13 +343,17 @@ def initialize_fresh_databases(
         v002_product_images.migrate_database(business_stage)
         v003_currency_metadata.migrate(business_stage)
         v004_product_specifications.migrate(business_stage)
+        v005_demo_orders.migrate(business_stage)
         _create_confirmation_outcomes(business_stage)
         _create_authentication_schema(authentication_stage)
 
         _verify_database(
             business_stage,
             _BUSINESS_COLUMNS,
-            {"idx_cart_confirmation_outcomes_expiry"},
+            {
+                "idx_cart_confirmation_outcomes_expiry",
+                "idx_orders_owner_reference",
+            },
             _BUSINESS_FOREIGN_KEYS,
         )
         _verify_database(

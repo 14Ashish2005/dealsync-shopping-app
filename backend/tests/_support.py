@@ -1,5 +1,6 @@
 import importlib
 import io
+import os
 import sqlite3
 import sys
 import tempfile
@@ -45,12 +46,28 @@ def _safe_import_main():
             )
         return original_open(path, *args, **kwargs)
 
-    with patch.object(Path, "is_file", new=is_file_without_real_secrets), patch.object(
-        Path,
-        "open",
-        new=open_without_real_secrets,
-    ):
-        return importlib.import_module("backend.main")
+    oauth_environment_variables = (
+        "DEALSYNC_ENV",
+        "DEALSYNC_GOOGLE_CLIENT_ID",
+        "DEALSYNC_GOOGLE_CLIENT_SECRET",
+        "DEALSYNC_OAUTH_COOKIE_SECRET",
+        "DEALSYNC_GOOGLE_SERVER_METADATA_URL",
+        "DEALSYNC_GOOGLE_REDIRECT_URI",
+        "DEALSYNC_FRONTEND_ORIGIN",
+    )
+    with patch.dict(os.environ):
+        for variable in oauth_environment_variables:
+            os.environ.pop(variable, None)
+        with patch.object(
+            Path,
+            "is_file",
+            new=is_file_without_real_secrets,
+        ), patch.object(
+            Path,
+            "open",
+            new=open_without_real_secrets,
+        ):
+            return importlib.import_module("backend.main")
 
 
 def import_main_with_temporary_auth_db():

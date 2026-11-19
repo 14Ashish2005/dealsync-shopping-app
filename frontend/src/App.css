@@ -181,6 +181,131 @@
   border-radius: 18px;
 }
 
+.demo-order-success {
+  margin: 12px 0;
+  padding: 11px 13px;
+  color: #176b4e;
+  background: #eaf8f1;
+  border: 1px solid #c8ecdc;
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.demo-order-actions {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  margin-top: 15px;
+}
+
+.demo-order-actions .demo-note {
+  max-width: 620px;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.order-history-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.order-refresh-button {
+  flex-shrink: 0;
+  padding: 9px 12px;
+  color: #5b53c6;
+  background: #f3f1ff;
+  border: 1px solid #dedbfa;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.order-refresh-button:disabled {
+  opacity: .6;
+  cursor: wait;
+}
+
+.demo-order-list {
+  display: grid;
+  gap: 14px;
+}
+
+.demo-order-card {
+  padding: 17px;
+  background: #fff;
+  border: 1px solid #edf0f6;
+  border-radius: 12px;
+}
+
+.demo-order-header,
+.demo-order-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.demo-order-heading {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.demo-order-heading strong,
+.demo-order-total strong {
+  color: #25324d;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.demo-order-heading span,
+.demo-order-total span {
+  color: #8994a8;
+  font-size: 9px;
+}
+
+.demo-order-status {
+  padding: 5px 8px;
+  color: #176b4e;
+  background: #eaf8f1;
+  border-radius: 20px;
+  font-size: 9px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.demo-order-items {
+  display: grid;
+  gap: 8px;
+  margin: 15px 0;
+  padding: 13px 0;
+  border-top: 1px solid #f0f2f7;
+  border-bottom: 1px solid #f0f2f7;
+  list-style: none;
+}
+
+.demo-order-items li {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  color: #53617b;
+  font-size: 10px;
+}
+
+.demo-order-items li span:first-child {
+  overflow-wrap: anywhere;
+}
+
+.demo-order-items li span:last-child {
+  flex-shrink: 0;
+  color: #8994a8;
+}
+
 .workspace-chat {
   min-height: 240px;
   max-height: 440px;

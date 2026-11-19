@@ -9,9 +9,9 @@ export default defineConfig({
     port: 5174,
     strictPort: true,
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/auth': 'http://localhost:8000',
-      '/health': 'http://localhost:8000',
+      '/api': 'https://dealsync-shopping-app.onrender.com',
+      '/auth': 'https://dealsync-shopping-app.onrender.com',
+      '/health': 'https://dealsync-shopping-app.onrender.com',
     },
   },
 })

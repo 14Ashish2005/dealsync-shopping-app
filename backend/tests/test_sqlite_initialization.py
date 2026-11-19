@@ -21,6 +21,7 @@ from backend.migrations import (
     v002_product_images,
     v003_currency_metadata,
     v004_product_specifications,
+    v005_demo_orders,
 )
 
 
@@ -178,6 +179,7 @@ assert LocalCatalogAdapter().search_catalog_products('') == []
             (v002_product_images, "migrate_database", "v002_product_images"),
             (v003_currency_metadata, "migrate", "v003_currency_metadata"),
             (v004_product_specifications, "migrate", "v004_product_specifications"),
+            (v005_demo_orders, "migrate", "v005_demo_orders"),
         )
         patches = []
         for module, attribute, name in migration_functions:

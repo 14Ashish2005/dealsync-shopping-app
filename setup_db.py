@@ -51,9 +51,26 @@ def create_database(db_path: str | os.PathLike[str] = DB_PATH):
             currency TEXT CHECK (
                 currency IS NULL OR currency GLOB '[A-Z][A-Z][A-Z]'
             ),
+            order_reference TEXT,
+            quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+            total_minor INTEGER CHECK (
+                total_minor IS NULL OR total_minor >= 0
+            ),
+            order_currency TEXT CHECK (
+                order_currency IS NULL OR
+                order_currency GLOB '[A-Z][A-Z][A-Z]'
+            ),
             FOREIGN KEY (product_id) REFERENCES products(id)
         )
     """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_orders_owner_id_id "
+        "ON orders(owner_id, id DESC)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_orders_owner_reference "
+        "ON orders(owner_id, order_reference)"
+    )
 
     products = [
         # --- Honey (8) ---

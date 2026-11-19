@@ -107,6 +107,201 @@ class CartApiFixture(unittest.TestCase):
         return None
 
 
+class DemoOrderApiTests(CartApiFixture):
+    def test_create_order_persists_server_cart_and_clears_it_after_commit(self):
+        added = self.client.post(
+            "/api/cart/items",
+            json={"product_id": 1, "quantity": 2},
+            cookies=self._cookies(self.owner_a),
+        )
+        self.assertEqual(added.status_code, 200)
+
+        response = self.client.post(
+            "/api/orders",
+            cookies=self._cookies(self.owner_a),
+        )
+        self.assertEqual(response.status_code, 201)
+        order = response.json()["order"]
+        self.assertTrue(order["order_id"])
+        self.assertEqual(order["status"], "Demo Order Placed")
+        self.assertEqual(order["currency"], "USD")
+        self.assertEqual(order["total_minor"], 2998)
+        self.assertEqual(
+            order["items"],
+            [
+                {
+                    "product_id": 1,
+                    "product_name": "Organic Raw Honey",
+                    "quantity": 2,
+                    "unit_price": 14.99,
+                    "currency": "USD",
+                }
+            ],
+        )
+        self.assertEqual(
+            self.client.get(
+                "/api/cart",
+                cookies=self._cookies(self.owner_a),
+            ).json()["items"],
+            [],
+        )
+
+        with closing(sqlite3.connect(self.store_path)) as connection:
+            stored = connection.execute(
+                """
+                SELECT owner_id, status, order_reference, quantity,
+                       total_minor, order_currency
+                FROM orders
+                """
+            ).fetchone()
+        self.assertEqual(
+            stored,
+            (self.owner_a, "Demo Order Placed", order["order_id"], 2, 2998, "USD"),
+        )
+
+    def test_order_history_is_authenticated_and_owner_scoped(self):
+        unauthenticated = self.client.get("/api/orders")
+        self.assertEqual(unauthenticated.status_code, 401)
+        self.assertEqual(self.client.post("/api/orders").status_code, 401)
+
+        empty_history = self.client.get(
+            "/api/orders",
+            cookies=self._cookies(self.owner_b),
+        )
+        self.assertEqual(empty_history.status_code, 200)
+        self.assertEqual(empty_history.json(), {"orders": []})
+
+        self.client.post(
+            "/api/cart/items",
+            json={"product_id": 1, "quantity": 1},
+            cookies=self._cookies(self.owner_a),
+        )
+        placed = self.client.post(
+            "/api/orders",
+            cookies=self._cookies(self.owner_a),
+        )
+        self.assertEqual(placed.status_code, 201)
+
+        owner_a_history = self.client.get(
+            "/api/orders",
+            cookies=self._cookies(self.owner_a),
+        )
+        owner_b_history = self.client.get(
+            "/api/orders",
+            cookies=self._cookies(self.owner_b),
+        )
+        self.assertEqual(len(owner_a_history.json()["orders"]), 1)
+        self.assertEqual(
+            owner_a_history.json()["orders"][0]["order_id"],
+            placed.json()["order"]["order_id"],
+        )
+        self.assertEqual(owner_b_history.json(), {"orders": []})
+
+    def test_multiple_products_are_grouped_with_server_calculated_total(self):
+        with closing(sqlite3.connect(self.store_path)) as connection:
+            connection.execute(
+                """
+                INSERT INTO products
+                    (id, name, category, price, description, is_organic, currency)
+                VALUES (4, 'Green Tea', 'Tea', 3.25, 'Tea', 0, 'USD')
+                """
+            )
+            connection.commit()
+
+        self.client.post(
+            "/api/cart/items",
+            json={"product_id": 1, "quantity": 2},
+            cookies=self._cookies(self.owner_a),
+        )
+        self.client.post(
+            "/api/cart/items",
+            json={"product_id": 4, "quantity": 3},
+            cookies=self._cookies(self.owner_a),
+        )
+        placed = self.client.post(
+            "/api/orders",
+            cookies=self._cookies(self.owner_a),
+        )
+        self.assertEqual(placed.status_code, 201)
+        order = placed.json()["order"]
+        self.assertEqual(order["total_minor"], 3973)
+        self.assertEqual(
+            {
+                item["product_name"]: item["quantity"]
+                for item in order["items"]
+            },
+            {"Organic Raw Honey": 2, "Green Tea": 3},
+        )
+
+        history = self.client.get(
+            "/api/orders",
+            cookies=self._cookies(self.owner_a),
+        ).json()["orders"]
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["total_minor"], 3973)
+        self.assertEqual(
+            {
+                item["product_name"]: item["quantity"]
+                for item in history[0]["items"]
+            },
+            {"Organic Raw Honey": 2, "Green Tea": 3},
+        )
+
+    def test_failed_order_write_keeps_cart_and_saves_no_order(self):
+        self.client.post(
+            "/api/cart/items",
+            json={"product_id": 1, "quantity": 2},
+            cookies=self._cookies(self.owner_a),
+        )
+        with closing(sqlite3.connect(self.store_path)) as connection:
+            connection.execute(
+                """
+                CREATE TRIGGER reject_demo_order
+                BEFORE INSERT ON orders
+                WHEN NEW.order_reference IS NOT NULL
+                BEGIN
+                    SELECT RAISE(ABORT, 'injected order write failure');
+                END
+                """
+            )
+            connection.commit()
+
+        response = self.client.post(
+            "/api/orders",
+            cookies=self._cookies(self.owner_a),
+        )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            self.client.get(
+                "/api/cart",
+                cookies=self._cookies(self.owner_a),
+            ).json()["items"][0]["quantity"],
+            2,
+        )
+        with closing(sqlite3.connect(self.store_path)) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM orders WHERE owner_id = ?",
+                    (self.owner_a,),
+                ).fetchone()[0],
+                0,
+            )
+
+    def test_unknown_currency_is_not_invented_for_order_total(self):
+        self.client.post(
+            "/api/cart/items",
+            json={"product_id": 3, "quantity": 1},
+            cookies=self._cookies(self.owner_a),
+        )
+        response = self.client.post(
+            "/api/orders",
+            cookies=self._cookies(self.owner_a),
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNone(response.json()["order"]["currency"])
+        self.assertIsNone(response.json()["order"]["total_minor"])
+
+
 class CartApiTests(CartApiFixture):
 
     def test_all_cart_endpoints_reject_unauthenticated_requests(self):

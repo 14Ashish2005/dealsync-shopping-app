@@ -11,10 +11,12 @@ import sqlite3
 import time
 import tomllib
 import traceback
+import uuid
 from collections import OrderedDict, deque
 from collections.abc import AsyncGenerator, Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager, closing
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from threading import BoundedSemaphore, Lock
@@ -71,6 +73,7 @@ from backend.currency import (
     currency_minor_unit_exponent,
     format_major_amount,
     parse_major_amount,
+    to_minor_units,
     validate_currency_code,
 )
 from backend.comparison.chat import (
@@ -99,6 +102,7 @@ from backend.db import (
     create_engines,
     transaction,
 )
+from backend.migrations import v005_demo_orders
 from backend.product_images import enrich_product_images
 from backend.providers import (
     DEFAULT_PROVIDER_REGISTRY,
@@ -798,6 +802,8 @@ async def lifespan(application):
                 },
             },
         )
+
+        v005_demo_orders.migrate(STORE_DB_PATH)
 
         provider_registry = PROVIDER_REGISTRY
         application.state.provider_registry = provider_registry
@@ -2181,6 +2187,213 @@ def api_clear_cart(request: Request):
         except Exception:
             connection.rollback()
             raise
+
+
+def _orders_response(rows: list[tuple]) -> list[dict]:
+    grouped_orders: OrderedDict[str, dict] = OrderedDict()
+    for (
+        row_id,
+        order_reference,
+        ordered_at,
+        product_id,
+        product_name,
+        price,
+        quantity,
+        currency,
+        total_minor,
+        order_currency,
+        status,
+    ) in rows:
+        order_key = order_reference or f"legacy:{row_id}"
+        order = grouped_orders.setdefault(
+            order_key,
+            {
+                "order_id": order_reference or str(row_id),
+                "ordered_at": ordered_at or "",
+                "status": status or "Status unavailable",
+                "currency": order_currency,
+                "total_minor": total_minor,
+                "items": [],
+            },
+        )
+        try:
+            item_currency = (
+                validate_currency_code(currency) if currency is not None else None
+            )
+        except ValueError:
+            item_currency = None
+        try:
+            unit_price = float(price)
+            if not math.isfinite(unit_price):
+                unit_price = None
+        except (TypeError, ValueError):
+            unit_price = None
+        order["items"].append(
+            {
+                "product_id": product_id,
+                "product_name": product_name,
+                "quantity": quantity,
+                "unit_price": unit_price,
+                "currency": item_currency,
+            }
+        )
+        if order["currency"] is not None:
+            try:
+                order["currency"] = validate_currency_code(order["currency"])
+            except ValueError:
+                order["currency"] = None
+        if not isinstance(order["total_minor"], int) or order["total_minor"] < 0:
+            order["total_minor"] = None
+
+    orders = list(grouped_orders.values())
+    for order in orders:
+        if order["total_minor"] is not None or not order["items"]:
+            continue
+        currencies = {item["currency"] for item in order["items"]}
+        if len(currencies) != 1 or None in currencies:
+            continue
+        try:
+            total = sum(
+                (
+                    Decimal(str(item["unit_price"])) * item["quantity"]
+                    for item in order["items"]
+                    if item["unit_price"] is not None
+                ),
+                Decimal("0"),
+            )
+            if any(item["unit_price"] is None for item in order["items"]):
+                continue
+            order["currency"] = next(iter(currencies))
+            order["total_minor"] = to_minor_units(total, order["currency"])
+        except ValueError:
+            order["currency"] = None
+            order["total_minor"] = None
+    return orders
+
+
+@app.post("/api/orders", status_code=201)
+def api_create_demo_order(request: Request):
+    owner_id = _authenticated_owner(request)
+    with closing(_connect_store()) as connection:
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            cart = _cart_response(connection, owner_id)
+            if not cart["items"]:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Add products to your cart before placing a demo order.",
+                )
+
+            order_currency = cart["currency"]
+            total_minor = None
+            if order_currency is not None:
+                total = sum(
+                    (
+                        Decimal(str(item["price"])) * item["quantity"]
+                        for item in cart["items"]
+                    ),
+                    Decimal("0"),
+                )
+                try:
+                    total_minor = to_minor_units(total, order_currency)
+                except ValueError as exc:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="The cart total cannot be represented safely.",
+                    ) from exc
+
+            order_reference = str(uuid.uuid4())
+            ordered_at = (
+                datetime.now(timezone.utc)
+                .isoformat(timespec="seconds")
+                .replace("+00:00", "Z")
+            )
+            status = "Demo Order Placed"
+            connection.executemany(
+                """
+                INSERT INTO orders (
+                    product_id, product_name, price, ordered_at, owner_id,
+                    status, currency, order_reference, quantity, total_minor,
+                    order_currency
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        item["product_id"],
+                        item["name"],
+                        item["price"],
+                        ordered_at,
+                        owner_id,
+                        status,
+                        item["currency"],
+                        order_reference,
+                        item["quantity"],
+                        total_minor,
+                        order_currency,
+                    )
+                    for item in cart["items"]
+                ],
+            )
+            connection.execute(
+                "DELETE FROM cart_items WHERE owner_id = ?",
+                (owner_id,),
+            )
+            connection.commit()
+        except sqlite3.Error as exc:
+            connection.rollback()
+            logger.exception("Could not save demo order.")
+            raise HTTPException(
+                status_code=503,
+                detail="Order storage is temporarily unavailable.",
+            ) from exc
+        except Exception:
+            connection.rollback()
+            raise
+
+    return {
+        "order": {
+            "order_id": order_reference,
+            "ordered_at": ordered_at,
+            "status": status,
+            "currency": order_currency,
+            "total_minor": total_minor,
+            "items": [
+                {
+                    "product_id": item["product_id"],
+                    "product_name": item["name"],
+                    "quantity": item["quantity"],
+                    "unit_price": item["price"],
+                    "currency": item["currency"],
+                }
+                for item in cart["items"]
+            ],
+        }
+    }
+
+
+@app.get("/api/orders")
+def api_get_orders(request: Request):
+    owner_id = _authenticated_owner(request)
+    try:
+        with closing(_connect_store()) as connection:
+            rows = connection.execute(
+                """
+                SELECT id, order_reference, ordered_at, product_id, product_name,
+                       price, quantity, currency, total_minor, order_currency, status
+                FROM orders
+                WHERE owner_id = ?
+                ORDER BY ordered_at DESC, id DESC
+                """,
+                (owner_id,),
+            ).fetchall()
+    except sqlite3.Error as exc:
+        logger.exception("Could not load order history.")
+        raise HTTPException(
+            status_code=503,
+            detail="Order history is temporarily unavailable.",
+        ) from exc
+    return {"orders": _orders_response(rows)}
 
 
 @app.get(

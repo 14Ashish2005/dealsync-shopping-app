@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import ExternalCart from './components/ExternalCart'
@@ -447,6 +447,12 @@ function displayEvidenceValue(value) {
     return JSON.stringify(value)
   }
   return String(value)
+}
+
+function formatOrderDate(value) {
+  if (typeof value !== 'string' || value.length === 0) return 'Date unavailable'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? 'Date unavailable' : date.toLocaleString()
 }
 
 function ComparisonResultView({
@@ -937,6 +943,12 @@ function App() {
   const [cartLoading, setCartLoading] = useState(true)
   const [cartOperation, setCartOperation] = useState('')
   const [cartError, setCartError] = useState('')
+  const [orderSubmitting, setOrderSubmitting] = useState(false)
+  const [orderSuccess, setOrderSuccess] = useState('')
+  const [orders, setOrders] = useState([])
+  const [ordersLoading, setOrdersLoading] = useState(false)
+  const [ordersError, setOrdersError] = useState('')
+  const [ordersReload, setOrdersReload] = useState(0)
   const [chatInput, setChatInput] = useState('')
   const [messages, setMessages] = useState([
     { from: 'assistant', text: 'Hello! I can help you discover products and compare deals. What are you shopping for today?' },
@@ -992,6 +1004,8 @@ function App() {
   const imagePreviewUrlRef = useRef('')
   const imageSearchInFlightRef = useRef(false)
   const comparisonInFlightRef = useRef(false)
+  const offerSearchPanelRef = useRef(null)
+  const pendingOfferSearchScrollRef = useRef(false)
   const imageRankings = useMemo(
     () =>
       new Map(
@@ -1016,6 +1030,13 @@ function App() {
       }
     }
   }, [])
+
+  useLayoutEffect(() => {
+    if (activeNav !== 'Products' || !pendingOfferSearchScrollRef.current) return
+
+    pendingOfferSearchScrollRef.current = false
+    offerSearchPanelRef.current?.scrollIntoView({ block: 'start' })
+  }, [activeNav])
 
   const refreshCart = useCallback(async (silent = false) => {
     if (!silent) setCartLoading(true)
@@ -1131,6 +1152,73 @@ function App() {
       window.removeEventListener('focus', refreshAuthentication)
     }
   }, [refreshAuthentication, refreshCart])
+
+  useEffect(() => {
+    if (activeNav !== 'My Orders' || authStatus !== 'authenticated') return undefined
+
+    const controller = new AbortController()
+    let cancelled = false
+
+    async function loadOrders() {
+      try {
+        const response = await fetch('/api/orders', {
+          credentials: 'same-origin',
+          signal: controller.signal,
+        })
+        const data = await readApiResponse(response, 'Order history request')
+        if (
+          !Array.isArray(data.orders) ||
+          data.orders.some(
+            (order) =>
+              !order ||
+              typeof order.order_id !== 'string' ||
+              typeof order.ordered_at !== 'string' ||
+              typeof order.status !== 'string' ||
+              (order.currency !== null && typeof order.currency !== 'string') ||
+              (order.total_minor !== null &&
+                !Number.isSafeInteger(order.total_minor)) ||
+              !Array.isArray(order.items) ||
+              order.items.some(
+                (item) =>
+                  !item ||
+                  typeof item.product_name !== 'string' ||
+                  !Number.isSafeInteger(item.quantity) ||
+                  item.quantity < 1 ||
+                  (item.unit_price !== null &&
+                    typeof item.unit_price !== 'number') ||
+                  (item.currency !== null &&
+                    typeof item.currency !== 'string'),
+              ),
+          )
+        ) {
+          throw new Error('The order history API returned an unexpected response.')
+        }
+        if (!cancelled) setOrders(data.orders)
+      } catch (error) {
+        if (cancelled || error.name === 'AbortError') return
+        if (error.status === 401) {
+          setAuthStatus('unauthenticated')
+          setOrders([])
+          return
+        }
+        setOrdersError(
+          error instanceof TypeError
+            ? 'Could not reach the order service. Check that the FastAPI backend is running.'
+            : error instanceof Error
+              ? error.message
+              : 'Could not load your order history.',
+        )
+      } finally {
+        if (!cancelled) setOrdersLoading(false)
+      }
+    }
+
+    loadOrders()
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [activeNav, authStatus, ordersReload])
 
   useEffect(() => {
     let cancelled = false
@@ -1694,6 +1782,17 @@ function App() {
         ? 'Currency unverified or mixed'
         : formatMajorPrice(cartSubtotal, cartCurrency)
 
+  function navigateTo(navItem) {
+    if (navItem === 'My Orders') {
+      setOrdersLoading(true)
+      setOrdersError('')
+      setOrdersReload((current) => current + 1)
+    } else if (activeNav === 'My Orders') {
+      setOrdersLoading(false)
+    }
+    setActiveNav(navItem)
+  }
+
   async function performCartOperation(operation, url, options = {}) {
     if (authStatus !== 'authenticated') {
       setCartError('Sign in with Google to manage your cart.')
@@ -1703,6 +1802,7 @@ function App() {
 
     setCartOperation(operation)
     setCartError('')
+    setOrderSuccess('')
     try {
       const response = await fetch(url, options)
       await readApiResponse(response, 'Cart update')
@@ -1767,6 +1867,51 @@ function App() {
 
   function clearCart() {
     return performCartOperation('clear', '/api/cart', { method: 'DELETE' })
+  }
+
+  async function placeDemoOrder() {
+    if (authStatus !== 'authenticated') {
+      setCartError('Sign in with Google to place a demo order.')
+      return
+    }
+    if (cart.length === 0 || cartOperation || orderSubmitting) return
+
+    setOrderSubmitting(true)
+    setCartError('')
+    setOrderSuccess('')
+    try {
+      const response = await fetch('/api/orders', {
+        method: 'POST',
+        credentials: 'same-origin',
+      })
+      const data = await readApiResponse(response, 'Demo order')
+      if (
+        !data.order ||
+        typeof data.order.order_id !== 'string' ||
+        !data.order.order_id
+      ) {
+        throw new Error('The order API returned an unexpected response.')
+      }
+      setCart([])
+      setCartSubtotal(0)
+      setCartCurrency(null)
+      setOrderSuccess(
+        `Demo order ${data.order.order_id} was saved. No payment was collected and no purchase was made from a retailer.`,
+      )
+    } catch (error) {
+      if (error.status === 401) {
+        setAuthStatus('unauthenticated')
+      }
+      setCartError(
+        error instanceof TypeError
+          ? 'Could not reach the order service. Check that the FastAPI backend is running.'
+          : error instanceof Error
+            ? error.message
+            : 'Could not place the demo order.',
+      )
+    } finally {
+      setOrderSubmitting(false)
+    }
   }
 
   async function addToProviderCart(offerId) {
@@ -2024,7 +2169,7 @@ function App() {
               <button
                 key={item.label}
                 className={`nav-item ${activeNav === item.label ? 'active' : ''}`}
-                onClick={() => setActiveNav(item.label)}
+                onClick={() => navigateTo(item.label)}
                 aria-label={
                   item.label === 'Compare'
                     ? `Compare products, ${comparisonSelection.length} selected`
@@ -2098,7 +2243,10 @@ function App() {
                       <button
                         className="hero-button"
                         type="button"
-                        onClick={() => setActiveNav('Products')}
+                        onClick={() => {
+                          pendingOfferSearchScrollRef.current = true
+                          setActiveNav('Products')
+                        }}
                       >
                         Find offers
                       </button>
@@ -2455,7 +2603,7 @@ function App() {
                   </>
                 )}
 
-                <section className="offer-search-panel">
+                <section className="offer-search-panel" ref={offerSearchPanelRef}>
                   <div className="section-heading">
                     <div>
                       <div className="eyebrow">REGISTERED PROVIDERS</div>
@@ -3297,9 +3445,19 @@ function App() {
                       tabIndex={0}
                       hidden={cartSection !== 'local'}
                     >
+                      {orderSuccess && (
+                        <p className="demo-order-success" role="status">
+                          {orderSuccess}
+                        </p>
+                      )}
                       {cartOperation && (
                         <p className="cart-operation-status" role="status">
                           Updating your cart...
+                        </p>
+                      )}
+                      {orderSubmitting && (
+                        <p className="cart-operation-status" role="status">
+                          Saving your demo order...
                         </p>
                       )}
                       {cartError && (
@@ -3361,12 +3519,29 @@ function App() {
                             <button
                               className="text-button"
                               onClick={clearCart}
-                              disabled={Boolean(cartOperation)}
+                              disabled={Boolean(cartOperation) || orderSubmitting}
                             >
                               Clear cart
                             </button>
                           </div>
-                          <p className="demo-note">Checkout and order creation are not available in this phase.</p>
+                          <div className="demo-order-actions">
+                            <button
+                              className="offer-search-button"
+                              type="button"
+                              onClick={placeDemoOrder}
+                              disabled={
+                                Boolean(cartOperation) ||
+                                orderSubmitting ||
+                                cart.length === 0
+                              }
+                            >
+                              {orderSubmitting ? 'Placing demo order...' : 'Place Demo Order'}
+                            </button>
+                            <p className="demo-note">
+                              Demo only: no payment is collected and no purchase is made from
+                              Amazon, Flipkart, or another retailer.
+                            </p>
+                          </div>
                         </>
                       )}
                     </div>
@@ -3392,16 +3567,111 @@ function App() {
 
             {activeNav === 'My Orders' && (
               <section className="workspace-panel">
-                <div className="workspace-page-heading">
-                  <div className="eyebrow">PURCHASE ACTIVITY</div>
-                  <h1>My Orders</h1>
-                  <p>Your order history will be shown here when connected.</p>
+                <div className="workspace-page-heading order-history-heading">
+                  <div>
+                    <div className="eyebrow">PURCHASE ACTIVITY</div>
+                    <h1>My Orders</h1>
+                    <p>
+                      Your saved demo orders. No payment or retailer purchase is made.
+                    </p>
+                  </div>
+                  {authStatus === 'authenticated' && (
+                    <button
+                      className="order-refresh-button"
+                      type="button"
+                      onClick={() => {
+                        setOrdersLoading(true)
+                        setOrdersError('')
+                        setOrdersReload((current) => current + 1)
+                      }}
+                      disabled={ordersLoading}
+                    >
+                      {ordersLoading ? 'Refreshing...' : 'Refresh orders'}
+                    </button>
+                  )}
                 </div>
-                <div className="workspace-empty">
-                  <div className="assistant-welcome-icon">?</div>
-                  <h2>Order history is not connected</h2>
-                  <p>This frontend preview does not load or create orders.</p>
-                </div>
+                {authStatus === 'loading' ||
+                (authStatus === 'authenticated' && ordersLoading) ? (
+                  <div className="workspace-empty" role="status">
+                    <p>Loading your order history...</p>
+                  </div>
+                ) : authStatus === 'unauthenticated' ? (
+                  <div className="workspace-empty">
+                    <div className="assistant-welcome-icon">?</div>
+                    <h2>Sign in to view your orders</h2>
+                    <p>Order history is private to your DealSync account.</p>
+                    <button className="hero-button" onClick={signIn}>
+                      Sign in with Google
+                    </button>
+                  </div>
+                ) : authStatus === 'error' ? (
+                  <div className="workspace-empty" role="alert">
+                    <p>Could not verify your sign-in. Retry authentication to load your orders.</p>
+                    <button className="hero-button" onClick={refreshAuthentication}>
+                      Retry
+                    </button>
+                  </div>
+                ) : ordersError ? (
+                  <div className="workspace-empty" role="alert">
+                    <p>{ordersError}</p>
+                    <button
+                      className="hero-button"
+                      onClick={
+                        authStatus === 'error'
+                          ? refreshAuthentication
+                          : () => {
+                              setOrdersLoading(true)
+                              setOrdersError('')
+                              setOrdersReload((current) => current + 1)
+                            }
+                      }
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : orders.length === 0 ? (
+                  <div className="workspace-empty">
+                    <div className="assistant-welcome-icon">▤</div>
+                    <h2>No demo orders yet</h2>
+                    <p>Place a demo order from your cart to see it here.</p>
+                  </div>
+                ) : (
+                  <div className="demo-order-list">
+                    {orders.map((order) => (
+                      <article className="demo-order-card" key={order.order_id}>
+                        <div className="demo-order-header">
+                          <div className="demo-order-heading">
+                            <strong>Order {order.order_id}</strong>
+                            <span>{formatOrderDate(order.ordered_at)}</span>
+                          </div>
+                          <span className="demo-order-status">{order.status}</span>
+                        </div>
+                        <ul className="demo-order-items">
+                          {order.items.map((item, index) => (
+                            <li key={`${item.product_id ?? item.product_name}-${index}`}>
+                              <span>
+                                {item.product_name} × {item.quantity}
+                              </span>
+                              <span>
+                                {item.unit_price === null
+                                  ? 'Price unavailable'
+                                  : `${formatMajorPrice(item.unit_price, item.currency)} each`}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                        <div className="demo-order-total">
+                          <span>Total</span>
+                          <strong>
+                            {order.total_minor === null || order.currency === null
+                              ? 'Currency unverified or mixed'
+                              : formatOfferPrice(order.total_minor, order.currency)}
+                          </strong>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
               </section>
             )}
 
@@ -3432,7 +3702,7 @@ function App() {
             <button
               key={item.label}
               className={`nav-item ${activeNav === item.label ? 'active' : ''}`}
-              onClick={() => setActiveNav(item.label)}
+              onClick={() => navigateTo(item.label)}
               aria-label={
                 item.label === 'Compare'
                   ? `Compare products, ${comparisonSelection.length} selected`
