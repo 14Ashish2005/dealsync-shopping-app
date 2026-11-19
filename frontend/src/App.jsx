@@ -2125,7 +2125,7 @@ function App() {
   }
 
   function signIn() {
-    window.open('/auth/google/login', '_blank', 'noopener,noreferrer')
+    window.location.assign('/auth/google/login')
   }
 
   async function signOut() {
@@ -2152,6 +2152,7 @@ function App() {
       setOrders([])
       setOrdersLoading(false)
       setOrdersError('')
+      window.location.replace('/')
       return true
     } catch (error) {
       setSignOutError(

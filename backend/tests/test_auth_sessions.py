@@ -146,14 +146,28 @@ class AuthSessionTests(unittest.TestCase):
                 "sub": "temporary-test-subject",
             },
         }
-        with patch.object(
-            main.oauth.google,
-            "authorize_access_token",
-            new=AsyncMock(return_value=identity),
+        with (
+            patch.object(
+                main,
+                "FRONTEND_ORIGINS",
+                ("https://shop.example.test",),
+            ),
+            patch.object(
+                main.oauth.google,
+                "authorize_access_token",
+                new=AsyncMock(return_value=identity),
+            ),
         ):
-            response = self.client.get("/auth/google/callback")
+            response = self.client.get(
+                "/auth/google/callback?next=https://attacker.example",
+                follow_redirects=False,
+            )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(
+            response.headers["location"],
+            "https://shop.example.test/dashboard",
+        )
         token = response.cookies.get(main.SESSION_COOKIE_NAME)
         self.assertTrue(token)
         expected_owner = hashlib.sha256(
@@ -162,6 +176,10 @@ class AuthSessionTests(unittest.TestCase):
         self.assertEqual(
             main.get_session_owner(token, self.authentication_engine),
             expected_owner,
+        )
+        self.assertEqual(
+            self.client.get("/auth/me").json(),
+            {"authenticated": True},
         )
 
 

@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 from authlib.integrations.starlette_client import OAuth
 from fastapi import Depends, FastAPI, HTTPException, Path as ApiPath, Request, Response
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -3528,9 +3528,9 @@ async def google_callback(request: Request):
         request.app.state.database_engines.authentication,
     )
 
-    response = Response(
-        content='{"authenticated":true,"message":"Google login successful."}',
-        media_type="application/json",
+    response = RedirectResponse(
+        url=f"{FRONTEND_ORIGINS[0]}/dashboard",
+        status_code=303,
     )
 
     response.set_cookie(

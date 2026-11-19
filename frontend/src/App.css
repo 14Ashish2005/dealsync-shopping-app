@@ -2002,3 +2002,26 @@
     font-size: 10px;
   }
 }
+
+.route-access-status {
+  min-height: 100vh;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 24px;
+  color: #25324d;
+  background: #f6f8fc;
+  text-align: center;
+}
+
+.route-access-status p {
+  max-width: 560px;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.route-access-status a {
+  color: #554dc7;
+  font-weight: 700;
+}
