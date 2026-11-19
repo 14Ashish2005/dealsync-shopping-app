@@ -1099,6 +1099,8 @@ function App() {
   const imagePreviewUrlRef = useRef('')
   const imageSearchInFlightRef = useRef(false)
   const comparisonInFlightRef = useRef(false)
+  const productSearchInputRef = useRef(null)
+  const pendingProductSearchFocusRef = useRef(false)
   const offerSearchPanelRef = useRef(null)
   const pendingOfferSearchScrollRef = useRef(false)
   const imageRankings = useMemo(
@@ -1131,6 +1133,14 @@ function App() {
 
     pendingOfferSearchScrollRef.current = false
     offerSearchPanelRef.current?.scrollIntoView({ block: 'start' })
+  }, [activeNav])
+
+  useLayoutEffect(() => {
+    if (activeNav !== 'Products' || !pendingProductSearchFocusRef.current) return
+
+    pendingProductSearchFocusRef.current = false
+    productSearchInputRef.current?.focus()
+    productSearchInputRef.current?.scrollIntoView({ block: 'center' })
   }, [activeNav])
 
   const refreshCart = useCallback(async (silent = false) => {
@@ -2683,6 +2693,7 @@ function App() {
                 <div className="search-box">
                   <span className="search-icon">?</span>
                   <input
+                    ref={productSearchInputRef}
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
                     placeholder="Search products..."
@@ -3928,18 +3939,36 @@ function App() {
           </section>
 
           <section className="stats-grid">
-            <div className="stat-card">
+            <button
+              className="stat-card"
+              type="button"
+              aria-label="Smart Search: open Products and focus product search"
+              onClick={() => {
+                pendingProductSearchFocusRef.current = true
+                navigateTo('Products')
+              }}
+            >
               <div className="stat-icon purple">⌕</div>
               <div><span className="stat-label">PRODUCT DISCOVERY</span><strong>Smart search</strong><small>Find what you need</small></div>
-            </div>
-            <div className="stat-card">
+            </button>
+            <button
+              className="stat-card"
+              type="button"
+              aria-label="Compare Price: open product comparison"
+              onClick={() => navigateTo('Compare')}
+            >
               <div className="stat-icon green">↗</div>
               <div><span className="stat-label">DEAL COMPARISON</span><strong>Compare prices</strong><small>Explore better value</small></div>
-            </div>
-            <div className="stat-card">
+            </button>
+            <button
+              className="stat-card"
+              type="button"
+              aria-label="Personal Help: open the AI shopping assistant"
+              onClick={() => navigateTo('AI Assistant')}
+            >
               <div className="stat-icon orange">✧</div>
               <div><span className="stat-label">AI ASSISTANCE</span><strong>Personal help</strong><small>Shopping made easier</small></div>
-            </div>
+            </button>
           </section>
 
           <div className="content-grid">
