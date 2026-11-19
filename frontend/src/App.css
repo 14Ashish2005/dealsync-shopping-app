@@ -1861,3 +1861,144 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+
+.account-control {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.account-trigger {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 11px 3px 4px;
+  color: #5149ba;
+  background: #f7f5ff;
+  border: 1px solid #e5e1ff;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color .18s ease, border-color .18s ease;
+}
+
+.account-trigger:hover {
+  background: #eeebff;
+  border-color: #cfc9ff;
+}
+
+.account-trigger:focus-visible,
+.account-signout-button:focus-visible {
+  outline: 3px solid #aaa4f0;
+  outline-offset: 2px;
+}
+
+.account-trigger-signed-in {
+  background: #fff;
+}
+
+.account-avatar {
+  width: 29px;
+  height: 29px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(145deg, #8274f5, #5c55d9);
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.account-dropdown {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 9px);
+  right: 0;
+  width: 264px;
+  max-width: calc(100vw - 24px);
+  padding: 13px;
+  background: #fff;
+  border: 1px solid #e8eaf2;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px #1c25401f;
+}
+
+.account-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.account-avatar-large {
+  width: 36px;
+  height: 36px;
+  font-size: 14px;
+}
+
+.account-identity-text {
+  display: grid;
+  gap: 3px;
+}
+
+.account-identity-text strong {
+  color: #25324d;
+  font-size: 11px;
+}
+
+.account-identity-text span,
+.account-profile-note {
+  color: #78849b;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.account-profile-note {
+  margin: 11px 0;
+}
+
+.account-signout-error {
+  margin: 0 0 10px;
+  color: #a13d51;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.account-signout-button {
+  width: 100%;
+  padding: 9px 10px;
+  color: #554dc7;
+  background: #f5f3ff;
+  border: 1px solid #e2defe;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.account-signout-button:hover {
+  background: #ece9ff;
+}
+
+.account-signout-button:disabled {
+  opacity: .6;
+  cursor: wait;
+}
+
+@media (max-width: 560px) {
+  .topbar-actions {
+    gap: 8px;
+  }
+
+  .account-trigger {
+    min-height: 34px;
+    gap: 6px;
+    padding-right: 9px;
+    font-size: 10px;
+  }
+}

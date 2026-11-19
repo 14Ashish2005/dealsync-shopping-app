@@ -303,6 +303,99 @@ function formatOfferPrice(priceMinor, currency) {
   }
 }
 
+function AccountControl({
+  isAuthenticated,
+  signOutPending,
+  signOutError,
+  onSignIn,
+  onSignOut,
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const containerRef = useRef(null)
+  const triggerRef = useRef(null)
+
+  useEffect(() => {
+    if (!isOpen) return undefined
+
+    function handlePointerDown(event) {
+      if (!containerRef.current?.contains(event.target)) {
+        setIsOpen(false)
+      }
+    }
+
+    function handleKeyDown(event) {
+      if (event.key !== 'Escape') return
+      setIsOpen(false)
+      triggerRef.current?.focus()
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isOpen])
+
+  return (
+    <div className="account-control" ref={containerRef}>
+      <button
+        ref={triggerRef}
+        className={`account-trigger ${isAuthenticated ? 'account-trigger-signed-in' : ''}`}
+        type="button"
+        onClick={
+          isAuthenticated
+            ? () => setIsOpen((current) => !current)
+            : onSignIn
+        }
+        aria-label={isAuthenticated ? 'Open account options' : 'Sign in with Google'}
+        aria-expanded={isAuthenticated ? isOpen : undefined}
+        aria-controls={isAuthenticated && isOpen ? 'account-dropdown' : undefined}
+      >
+        <span className="account-avatar" aria-hidden="true">G</span>
+        <span className="account-trigger-label">
+          {isAuthenticated ? 'Account' : 'Sign in'}
+        </span>
+      </button>
+
+      {isAuthenticated && isOpen && (
+        <div
+          className="account-dropdown"
+          id="account-dropdown"
+          role="group"
+          aria-label="Account options"
+        >
+          <div className="account-identity">
+            <span className="account-avatar account-avatar-large" aria-hidden="true">
+              G
+            </span>
+            <div className="account-identity-text">
+              <strong>Google account</strong>
+              <span>Signed in</span>
+            </div>
+          </div>
+          <p className="account-profile-note">
+            Name, email, and profile photo are not available from this sign-in response.
+          </p>
+          {signOutError && (
+            <p className="account-signout-error" role="alert">
+              {signOutError}
+            </p>
+          )}
+          <button
+            className="account-signout-button"
+            type="button"
+            onClick={onSignOut}
+            disabled={signOutPending}
+          >
+            {signOutPending ? 'Signing out...' : 'Sign out'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function DemoOfferNotice() {
   return (
     <div className="demo-offer-notice" role="note">
@@ -940,6 +1033,8 @@ function App() {
   const [cartSubtotal, setCartSubtotal] = useState(0)
   const [cartCurrency, setCartCurrency] = useState(null)
   const [authStatus, setAuthStatus] = useState('loading')
+  const [signOutPending, setSignOutPending] = useState(false)
+  const [signOutError, setSignOutError] = useState('')
   const [cartLoading, setCartLoading] = useState(true)
   const [cartOperation, setCartOperation] = useState('')
   const [cartError, setCartError] = useState('')
@@ -2033,6 +2128,45 @@ function App() {
     window.open('/auth/google/login', '_blank', 'noopener,noreferrer')
   }
 
+  async function signOut() {
+    setSignOutPending(true)
+    setSignOutError('')
+
+    try {
+      const response = await fetch('/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+      })
+      const data = await readApiResponse(response, 'Sign out')
+      if (data.authenticated !== false) {
+        throw new Error('The sign-out service returned an unexpected response.')
+      }
+
+      setAuthStatus('unauthenticated')
+      setCart([])
+      setCartSubtotal(0)
+      setCartCurrency(null)
+      setCartLoading(false)
+      setCartError('')
+      setOrderSuccess('')
+      setOrders([])
+      setOrdersLoading(false)
+      setOrdersError('')
+      return true
+    } catch (error) {
+      setSignOutError(
+        error instanceof TypeError
+          ? 'Could not confirm sign out. Refresh and check your session.'
+          : error instanceof Error
+            ? error.message
+            : 'Could not sign out. Please try again.',
+      )
+      return false
+    } finally {
+      setSignOutPending(false)
+    }
+  }
+
   function handleCartTabKeyDown(event) {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
 
@@ -2210,7 +2344,14 @@ function App() {
             <div className="breadcrumb">Workspace <span>/</span> {activeNav}</div>
             <div className="topbar-actions">
               <span className="preview-label"><span className="status-dot" /> Frontend preview</span>
-              <div className="top-avatar">G</div>
+              <AccountControl
+                key={authStatus === 'authenticated' ? 'signed-in' : 'signed-out'}
+                isAuthenticated={authStatus === 'authenticated'}
+                signOutPending={signOutPending}
+                signOutError={signOutError}
+                onSignIn={signIn}
+                onSignOut={signOut}
+              />
             </div>
           </header>
 
@@ -3744,7 +3885,14 @@ function App() {
           <div className="topbar-actions">
             <span className="preview-label"><span className="status-dot" /> Frontend preview</span>
             <button className="icon-button" aria-label="Notifications">♧</button>
-            <div className="top-avatar">G</div>
+            <AccountControl
+              key={authStatus === 'authenticated' ? 'signed-in' : 'signed-out'}
+              isAuthenticated={authStatus === 'authenticated'}
+              signOutPending={signOutPending}
+              signOutError={signOutError}
+              onSignIn={signIn}
+              onSignOut={signOut}
+            />
           </div>
         </header>
 
