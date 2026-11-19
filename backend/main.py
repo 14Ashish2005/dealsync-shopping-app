@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import ipaddress
 import json
 import logging
 import math
@@ -11,7 +12,7 @@ import time
 import tomllib
 import traceback
 from collections import OrderedDict, deque
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager, closing
 from decimal import Decimal
@@ -134,6 +135,8 @@ logger = logging.getLogger(__name__)
 # Project configuration
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SECRETS_FILE = PROJECT_ROOT / ".streamlit" / "secrets.toml"
+LOCAL_GOOGLE_CALLBACK_URL = "http://localhost:8000/auth/google/callback"
+LOCAL_FRONTEND_ORIGIN = "http://localhost:5174"
 STORE_DB_PATH = BUSINESS_SQLITE_PATH
 
 # Separate authentication database.
@@ -144,7 +147,184 @@ SESSION_COOKIE_NAME = "dealsync_session"
 SESSION_MAX_AGE = 3600
 MAX_CART_QUANTITY = 9_007_199_254_740_991
 CART_CONFIRMATION_OUTCOME_TTL_SECONDS = 24 * 60 * 60
-FRONTEND_ORIGINS = ("http://localhost:5174",)
+
+_OAUTH_ENVIRONMENT_VARIABLES = {
+    "client_id": "DEALSYNC_GOOGLE_CLIENT_ID",
+    "client_secret": "DEALSYNC_GOOGLE_CLIENT_SECRET",
+    "cookie_secret": "DEALSYNC_OAUTH_COOKIE_SECRET",
+    "server_metadata_url": "DEALSYNC_GOOGLE_SERVER_METADATA_URL",
+}
+
+
+def _configured_environment(environ: Mapping[str, str]) -> str:
+    environment = environ.get("DEALSYNC_ENV", "development")
+    if environment not in {"development", "test", "production"}:
+        raise RuntimeError(
+            "DEALSYNC_ENV must be development, test, or production."
+        )
+    return environment
+
+
+def _secure_cookies(environ: Mapping[str, str]) -> bool:
+    return _configured_environment(environ) == "production"
+
+
+def _load_auth_config(
+    *,
+    environ: Mapping[str, str] | None = None,
+    secrets_file: Path = SECRETS_FILE,
+) -> dict[str, str]:
+    environment = os.environ if environ is None else environ
+    mode = _configured_environment(environment)
+    auth_config: dict[str, str] = {}
+
+    missing_environment_values = [
+        variable
+        for key, variable in _OAUTH_ENVIRONMENT_VARIABLES.items()
+        if variable not in environment
+    ]
+    if mode != "production" and missing_environment_values:
+        if not secrets_file.is_file():
+            raise RuntimeError("Google OAuth configuration file was not found.")
+        with secrets_file.open("rb") as file:
+            config = tomllib.load(file)
+        configured_auth = config.get("auth", {})
+        if not isinstance(configured_auth, dict):
+            raise RuntimeError("Google OAuth configuration is invalid.")
+        auth_config.update(configured_auth)
+
+    for key, variable in _OAUTH_ENVIRONMENT_VARIABLES.items():
+        if variable in environment:
+            auth_config[key] = environment[variable]
+
+    missing_values = [
+        variable
+        for key, variable in _OAUTH_ENVIRONMENT_VARIABLES.items()
+        if not isinstance(auth_config.get(key), str)
+        or not auth_config[key].strip()
+    ]
+    if missing_values:
+        if mode == "production":
+            raise RuntimeError(
+                "Missing required production OAuth environment variables: "
+                f"{', '.join(missing_values)}."
+            )
+        raise RuntimeError("Required Google OAuth configuration is incomplete.")
+
+    _validate_absolute_url(
+        auth_config["server_metadata_url"],
+        "DEALSYNC_GOOGLE_SERVER_METADATA_URL",
+        require_https=mode == "production",
+    )
+    return auth_config
+
+
+def _validate_absolute_url(
+    value: str,
+    setting_name: str,
+    *,
+    require_https: bool,
+) -> None:
+    try:
+        parsed = urlsplit(value)
+        valid = (
+            value == value.strip()
+            and parsed.scheme in ({"https"} if require_https else {"http", "https"})
+            and bool(parsed.hostname)
+            and not (require_https and _is_loopback_hostname(parsed.hostname))
+            and (parsed.port is None or 1 <= parsed.port <= 65535)
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.fragment
+            and "*" not in parsed.netloc
+        )
+    except ValueError:
+        valid = False
+    if not valid:
+        expected_scheme = (
+            "HTTPS with a non-loopback host"
+            if require_https
+            else "an absolute HTTP(S) URL"
+        )
+        raise RuntimeError(f"{setting_name} must be {expected_scheme}.")
+
+
+def _is_loopback_hostname(hostname: str) -> bool:
+    normalized_hostname = hostname.rstrip(".").casefold()
+    if normalized_hostname == "localhost" or normalized_hostname.endswith(
+        ".localhost"
+    ):
+        return True
+
+    try:
+        address = ipaddress.ip_address(normalized_hostname)
+    except ValueError:
+        parts = normalized_hostname.split(".")
+        return all(
+            (part.isascii() and part.isdecimal())
+            or (
+                part.casefold().startswith("0x")
+                and len(part) > 2
+                and all(
+                    character in "0123456789abcdef"
+                    for character in part[2:].casefold()
+                )
+            )
+            for part in parts
+        )
+
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    return address.is_loopback
+
+
+def _google_redirect_uri(environ: Mapping[str, str]) -> str:
+    environment = _configured_environment(environ)
+    configured_uri = environ.get("DEALSYNC_GOOGLE_REDIRECT_URI")
+    if configured_uri is None:
+        if environment == "production":
+            raise RuntimeError(
+                "DEALSYNC_GOOGLE_REDIRECT_URI is required in production."
+            )
+        return LOCAL_GOOGLE_CALLBACK_URL
+    if not configured_uri.strip():
+        raise RuntimeError("DEALSYNC_GOOGLE_REDIRECT_URI must not be empty.")
+    _validate_absolute_url(
+        configured_uri,
+        "DEALSYNC_GOOGLE_REDIRECT_URI",
+        require_https=environment == "production",
+    )
+    return configured_uri
+
+
+def _frontend_origins(environ: Mapping[str, str]) -> tuple[str, ...]:
+    environment = _configured_environment(environ)
+    configured_origin = environ.get("DEALSYNC_FRONTEND_ORIGIN")
+    if configured_origin is None:
+        if environment == "production":
+            raise RuntimeError("DEALSYNC_FRONTEND_ORIGIN is required in production.")
+        return (LOCAL_FRONTEND_ORIGIN,)
+    if not configured_origin.strip():
+        raise RuntimeError("DEALSYNC_FRONTEND_ORIGIN must not be empty.")
+
+    _validate_absolute_url(
+        configured_origin,
+        "DEALSYNC_FRONTEND_ORIGIN",
+        require_https=environment == "production",
+    )
+    parsed = urlsplit(configured_origin)
+    if parsed.path not in ("", "/") or parsed.query:
+        raise RuntimeError(
+            "DEALSYNC_FRONTEND_ORIGIN must contain only an origin."
+        )
+    return (configured_origin.rstrip("/"),)
+
+
+ENVIRONMENT = _configured_environment(os.environ)
+auth_config = _load_auth_config()
+GOOGLE_CALLBACK_URL = _google_redirect_uri(os.environ)
+FRONTEND_ORIGINS = _frontend_origins(os.environ)
+SECURE_COOKIES = _secure_cookies(os.environ)
 
 MAX_IMAGE_SEARCH_REQUEST_BODY_BYTES = MAX_UPLOAD_SIZE_BYTES + 64 * 1024
 MAX_COMPARISON_REQUEST_BODY_BYTES = 32 * 1024
@@ -430,25 +610,6 @@ class _PerUserRateLimiter:
             self._requests.move_to_end(owner_id)
             return True
 
-if not SECRETS_FILE.is_file():
-    raise RuntimeError("Google OAuth configuration file was not found.")
-
-with SECRETS_FILE.open("rb") as file:
-    config = tomllib.load(file)
-
-auth_config = config.get("auth", {})
-
-required_values = (
-    "cookie_secret",
-    "client_id",
-    "client_secret",
-    "server_metadata_url",
-)
-
-if not all(auth_config.get(key) for key in required_values):
-    raise RuntimeError("Required Google OAuth configuration is incomplete.")
-
-
 def _validate_database_schema(
     engine: Engine,
     database_name: str,
@@ -711,7 +872,7 @@ app.add_middleware(
     session_cookie="dealsync_oauth_state",
     max_age=600,
     same_site="lax",
-    https_only=False,
+    https_only=SECURE_COOKIES,
 )
 
 
@@ -725,9 +886,6 @@ oauth.register(
     server_metadata_url=auth_config["server_metadata_url"],
     client_kwargs={"scope": "openid email profile"},
 )
-
-GOOGLE_CALLBACK_URL = "http://localhost:8000/auth/google/callback"
-
 
 @app.get("/health")
 async def health():
@@ -3167,7 +3325,7 @@ async def google_callback(request: Request):
         value=session_token,
         max_age=SESSION_MAX_AGE,
         httponly=True,
-        secure=False,
+        secure=SECURE_COOKIES,
         samesite="lax",
         path="/",
     )
@@ -3203,7 +3361,7 @@ async def logout(request: Request):
         key=SESSION_COOKIE_NAME,
         path="/",
         httponly=True,
-        secure=False,
+        secure=SECURE_COOKIES,
         samesite="lax",
     )
 

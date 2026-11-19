@@ -24,12 +24,15 @@ from backend.database_paths import (
 
 DatabaseName = Literal["business", "authentication"]
 EnvironmentName = Literal["development", "production", "test"]
+ProductionDatabaseBackend = Literal["postgresql", "sqlite"]
 TestDatabaseSource = str | Path | URL
 
 _PRODUCTION_URL_VARIABLES: dict[DatabaseName, str] = {
     "business": "DATABASE_URL",
     "authentication": "AUTH_DATABASE_URL",
 }
+_PRODUCTION_DATABASE_BACKEND_VARIABLE = "DEALSYNC_DATABASE_BACKEND"
+_DEFAULT_PRODUCTION_DATABASE_BACKEND = "postgresql"
 _DATABASE_PATHS: dict[DatabaseName, Path] = {
     "business": BUSINESS_SQLITE_PATH,
     "authentication": AUTHENTICATION_SQLITE_PATH,
@@ -153,6 +156,52 @@ def _production_urls(environ: Mapping[str, str]) -> dict[DatabaseName, URL]:
     return urls
 
 
+def _production_database_backend(
+    environ: Mapping[str, str],
+) -> ProductionDatabaseBackend:
+    backend = environ.get(
+        _PRODUCTION_DATABASE_BACKEND_VARIABLE,
+        _DEFAULT_PRODUCTION_DATABASE_BACKEND,
+    )
+    if backend == "postgresql":
+        return "postgresql"
+    if backend == "sqlite":
+        return "sqlite"
+    raise DatabaseConfigurationError(
+        f"{_PRODUCTION_DATABASE_BACKEND_VARIABLE} must be postgresql or sqlite."
+    )
+
+
+def _production_sqlite_paths(
+    environ: Mapping[str, str],
+) -> dict[DatabaseName, Path]:
+    paths: dict[DatabaseName, Path] = {}
+    for database, variable_name in _DATABASE_PATH_VARIABLES.items():
+        configured_path = environ.get(variable_name)
+        if configured_path is None or not configured_path.strip():
+            raise DatabaseConfigurationError(
+                f"{variable_name} is required when "
+                f"{_PRODUCTION_DATABASE_BACKEND_VARIABLE}=sqlite."
+            )
+        if not Path(configured_path).expanduser().is_absolute():
+            raise DatabaseConfigurationError(
+                f"{variable_name} must be an absolute path in production."
+            )
+
+        path = sqlite_database_path(database, environ=environ)
+        if not path.is_file():
+            raise DatabaseConfigurationError(
+                f"The {database} SQLite database file does not exist at {path}."
+            )
+        paths[database] = path
+
+    if paths["business"].samefile(paths["authentication"]):
+        raise DatabaseConfigurationError(
+            "Business and authentication SQLite paths must differ."
+        )
+    return paths
+
+
 def _temporary_sqlite_url(source: TestDatabaseSource | None) -> URL:
     if source is None:
         raise DatabaseConfigurationError(
@@ -250,10 +299,19 @@ def get_database_config(
             ),
         )
 
+    production_backend = _production_database_backend(environment)
+    if production_backend == "sqlite":
+        paths = _production_sqlite_paths(environment)
+        url = URL.create(
+            "sqlite+pysqlite",
+            database=str(paths[database]),
+        )
+    else:
+        url = _production_urls(environment)[database]
     return DatabaseConfig(
         environment=mode,
         database=database,
-        url=_production_urls(environment)[database],
+        url=url,
     )
 
 
@@ -299,8 +357,20 @@ def _add_sqlite_foreign_key_hook(engine: Engine) -> Engine:
     return engine
 
 
+def _create_existing_sqlite_engine(config: DatabaseConfig) -> Engine:
+    return _add_sqlite_foreign_key_hook(
+        create_engine(
+            config.url,
+            creator=lambda: _existing_sqlite_connection(config),
+            hide_parameters=True,
+        )
+    )
+
+
 def _create_engine(config: DatabaseConfig) -> Engine:
     if config.environment == "production":
+        if config.url.get_backend_name() == "sqlite":
+            return _create_existing_sqlite_engine(config)
         return create_engine(
             config.url,
             pool_pre_ping=True,
@@ -311,13 +381,7 @@ def _create_engine(config: DatabaseConfig) -> Engine:
         )
 
     if config.environment == "development":
-        return _add_sqlite_foreign_key_hook(
-            create_engine(
-                config.url,
-                creator=lambda: _existing_sqlite_connection(config),
-                hide_parameters=True,
-            )
-        )
+        return _create_existing_sqlite_engine(config)
 
     return _add_sqlite_foreign_key_hook(
         create_engine(
