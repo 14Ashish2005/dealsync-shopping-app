@@ -662,7 +662,8 @@
 
 .image-file-picker {
   display: grid;
-  width: min(100%, 520px);
+  min-width: 0;
+  width: 100%;
   gap: 9px;
   padding: 14px;
   color: #5e57c6;
@@ -675,10 +676,80 @@
   cursor: pointer;
 }
 
+.image-selection-options {
+  display: grid;
+  width: min(100%, 520px);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
 .image-file-picker input {
   max-width: 100%;
   color: #69758c;
   font-size: 9px;
+}
+
+.image-camera-button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 68px;
+  padding: 14px;
+  color: #5e57c6;
+  background: #faf9ff;
+  border: 1px dashed #c9c4f4;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.image-camera-icon {
+  flex: 0 0 18px;
+  color: #5e57c6;
+}
+
+.image-camera-button:hover:not(:disabled) {
+  background: #f2f0ff;
+  border-color: #aaa3ec;
+}
+
+.image-camera-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.image-camera-panel {
+  display: grid;
+  width: min(100%, 520px);
+  gap: 10px;
+}
+
+.image-camera-selector {
+  width: 100%;
+}
+
+.image-camera-preview {
+  display: block;
+  width: 100%;
+  max-height: min(60vh, 520px);
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: #111827;
+  border-radius: 10px;
+}
+
+.image-camera-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.image-camera-controls button {
+  min-height: 44px;
 }
 
 .image-preview {
@@ -718,6 +789,13 @@
 .image-search-message {
   color: #8994a8;
   font-size: 9px;
+}
+
+.image-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .image-search-form {
@@ -1221,9 +1299,22 @@
     height: 65px;
   }
 
-  .image-remove-button {
+  .image-preview-actions {
     grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .image-remove-button {
     justify-self: start;
+  }
+
+  .image-camera-preview {
+    aspect-ratio: 3 / 4;
+    max-height: 60vh;
+  }
+
+  .image-camera-controls {
+    gap: 8px;
   }
 
   .workspace-cart-row {

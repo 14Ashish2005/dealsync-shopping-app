@@ -1089,6 +1089,11 @@ function App() {
   const [comparisonResult, setComparisonResult] = useState(null)
   const [selectedImage, setSelectedImage] = useState(null)
   const [imagePreviewUrl, setImagePreviewUrl] = useState('')
+  const [isCapturedImage, setIsCapturedImage] = useState(false)
+  const [isCameraOpen, setIsCameraOpen] = useState(false)
+  const [cameraError, setCameraError] = useState('')
+  const [cameraDevices, setCameraDevices] = useState([])
+  const [activeCameraId, setActiveCameraId] = useState('')
   const [imageProviderKey, setImageProviderKey] = useState('')
   const [imageMaxPrice, setImageMaxPrice] = useState('')
   const [imageCurrency, setImageCurrency] = useState('')
@@ -1099,6 +1104,9 @@ function App() {
   const [imageSearchSearched, setImageSearchSearched] = useState(false)
   const imageFileInputRef = useRef(null)
   const imagePreviewUrlRef = useRef('')
+  const cameraVideoRef = useRef(null)
+  const cameraStreamRef = useRef(null)
+  const cameraRequestIdRef = useRef(0)
   const imageSearchInFlightRef = useRef(false)
   const comparisonInFlightRef = useRef(false)
   const voiceRecognitionRef = useRef(null)
@@ -1107,6 +1115,13 @@ function App() {
   const pendingProductSearchFocusRef = useRef(false)
   const offerSearchPanelRef = useRef(null)
   const pendingOfferSearchScrollRef = useRef(false)
+  const stopCamera = useCallback((updateUi = true) => {
+    cameraRequestIdRef.current += 1
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop())
+    cameraStreamRef.current = null
+    if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null
+    if (updateUi) setIsCameraOpen(false)
+  }, [])
   const imageRankings = useMemo(
     () =>
       new Map(
@@ -1125,6 +1140,7 @@ function App() {
 
   useEffect(() => {
     return () => {
+      stopCamera(false)
       if (imagePreviewUrlRef.current) {
         URL.revokeObjectURL(imagePreviewUrlRef.current)
         imagePreviewUrlRef.current = ''
@@ -1133,7 +1149,21 @@ function App() {
       voiceRecognitionRef.current = null
       activeRecognition?.abort()
     }
-  }, [])
+  }, [stopCamera])
+
+  useLayoutEffect(() => {
+    return () => {
+      if (activeNav === 'Shop by Image') stopCamera(false)
+    }
+  }, [activeNav, stopCamera])
+
+  useEffect(() => {
+    if (!isCameraOpen || !cameraVideoRef.current || !cameraStreamRef.current) return
+    cameraVideoRef.current.srcObject = cameraStreamRef.current
+    cameraVideoRef.current.play().catch(() => {
+      setCameraError('Camera preview could not start. Check your browser permissions and try again.')
+    })
+  }, [isCameraOpen])
 
   useLayoutEffect(() => {
     if (activeNav !== 'Products' || !pendingOfferSearchScrollRef.current) return
@@ -1752,8 +1782,7 @@ function App() {
       setImagePreviewUrl('')
     }
 
-    function handleImageSelection(event) {
-      const file = event.target.files?.[0]
+    function selectImageFile(file, captured = false) {
       if (!file) return
 
       const extension = file.name
@@ -1762,12 +1791,10 @@ function App() {
       const supportedTypes = IMAGE_FILE_TYPES[extension]
       if (!supportedTypes || !supportedTypes.includes(file.type.toLowerCase())) {
         setImageSearchError('Choose a valid JPEG, PNG, or WebP image.')
-        event.target.value = ''
         return
       }
       if (file.size > MAX_IMAGE_FILE_BYTES) {
         setImageSearchError('The image must be no larger than 10 MiB.')
-        event.target.value = ''
         return
       }
 
@@ -1776,14 +1803,131 @@ function App() {
       imagePreviewUrlRef.current = previewUrl
       setImagePreviewUrl(previewUrl)
       setSelectedImage(file)
+      setIsCapturedImage(captured)
       setImageSearchError('')
       setImageSearchResult(null)
       setImageSearchSearched(false)
     }
 
+    function handleImageSelection(event) {
+      selectImageFile(event.target.files?.[0])
+      event.target.value = ''
+    }
+
+    async function startCamera(deviceId = '') {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        setCameraError(
+          'Camera access is unavailable in this browser or connection. Use a secure connection or upload an image instead.',
+        )
+        return
+      }
+
+      const requestId = cameraRequestIdRef.current + 1
+      cameraRequestIdRef.current = requestId
+      cameraStreamRef.current?.getTracks().forEach((track) => track.stop())
+      cameraStreamRef.current = null
+      setCameraDevices([])
+      setCameraError('')
+      setIsCameraOpen(true)
+
+      let stream
+      try {
+        const videoConstraints = deviceId
+          ? { deviceId: { exact: deviceId } }
+          : { facingMode: { ideal: 'environment' } }
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: videoConstraints,
+            audio: false,
+          })
+        } catch (error) {
+          if (
+            deviceId ||
+            error.name === 'NotAllowedError' ||
+            error.name === 'SecurityError'
+          ) {
+            throw error
+          }
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          })
+        }
+
+        if (cameraRequestIdRef.current !== requestId) {
+          stream.getTracks().forEach((track) => track.stop())
+          return
+        }
+
+        cameraStreamRef.current = stream
+        if (cameraVideoRef.current) {
+          cameraVideoRef.current.srcObject = stream
+          cameraVideoRef.current.play().catch(() => {
+            setCameraError(
+              'Camera preview could not start. Check your browser permissions and try again.',
+            )
+          })
+        }
+        const [devices, track] = await Promise.all([
+          navigator.mediaDevices.enumerateDevices(),
+          Promise.resolve(stream.getVideoTracks()[0]),
+        ])
+        if (cameraRequestIdRef.current !== requestId) return
+        setCameraDevices(devices.filter((device) => device.kind === 'videoinput'))
+        setActiveCameraId(track?.getSettings().deviceId || deviceId)
+      } catch (error) {
+        if (cameraRequestIdRef.current !== requestId) return
+        cameraStreamRef.current?.getTracks().forEach((track) => track.stop())
+        cameraStreamRef.current = null
+        if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null
+        setIsCameraOpen(false)
+        if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
+          setCameraError('Camera permission was denied. Allow camera access or upload an image instead.')
+        } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+          setCameraError('No camera was found. Upload an image instead.')
+        } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+          setCameraError('The camera is unavailable or already in use. Upload an image or try again.')
+        } else {
+          setCameraError('Could not open the camera. Upload an image or try again.')
+        }
+      }
+    }
+
+    function capturePhoto() {
+      const video = cameraVideoRef.current
+      if (!video?.videoWidth || !video?.videoHeight) {
+        setCameraError('The camera is not ready yet. Please wait and try again.')
+        return
+      }
+
+      const canvas = document.createElement('canvas')
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      const context = canvas.getContext('2d')
+      if (!context) {
+        setCameraError('Photo capture is unavailable. Please try again or upload an image.')
+        return
+      }
+      context.drawImage(video, 0, 0, canvas.width, canvas.height)
+      const captureRequestId = cameraRequestIdRef.current
+      canvas.toBlob((blob) => {
+        if (cameraRequestIdRef.current !== captureRequestId) return
+        if (!blob) {
+          setCameraError('Could not capture the photo. Please try again.')
+          return
+        }
+        const file = new File([blob], `camera-photo-${Date.now()}.jpg`, {
+          type: 'image/jpeg',
+        })
+        selectImageFile(file, true)
+        stopCamera()
+      }, 'image/jpeg', 0.92)
+    }
+
     function clearImageSelection() {
       releaseImagePreview()
       setSelectedImage(null)
+      setIsCapturedImage(false)
       setImageSearchError('')
       setImageSearchResult(null)
       setImageSearchSearched(false)
@@ -3327,17 +3471,91 @@ function App() {
                 <div className="workspace-upload">
                   <h2>Choose a product image</h2>
                   <p>Select a JPEG, PNG or WebP image. It will only be uploaded when you start the search.</p>
-                  <label className="image-file-picker">
-                    {selectedImage ? 'Replace image' : 'Choose image'}
-                    <input
-                      ref={imageFileInputRef}
-                      type="file"
-                      accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/jpg,image/png,image/webp"
-                      aria-label="Choose a product image"
-                      onChange={handleImageSelection}
-                      disabled={imageSearchLoading}
-                    />
-                  </label>
+                  <div className="image-selection-options">
+                    <label className="image-file-picker">
+                      <span>{selectedImage ? 'Upload a different image' : 'Upload Image'}</span>
+                      <input
+                        ref={imageFileInputRef}
+                        type="file"
+                        accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/jpg,image/png,image/webp"
+                        aria-label="Upload a product image"
+                        onChange={handleImageSelection}
+                        disabled={imageSearchLoading}
+                      />
+                    </label>
+                    <button
+                      className="image-camera-button"
+                      type="button"
+                      onClick={() => void startCamera()}
+                      disabled={imageSearchLoading || isCameraOpen}
+                    >
+                      <svg
+                        className="image-camera-icon"
+                        aria-hidden="true"
+                        viewBox="0 0 24 24"
+                        width="18"
+                        height="18"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M14 4h-4l-2 3H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z" />
+                        <circle cx="12" cy="13" r="3" />
+                      </svg>
+                      Take Photo
+                    </button>
+                  </div>
+                  {cameraError && (
+                    <p className="image-search-error" role="alert">
+                      {cameraError}
+                    </p>
+                  )}
+                  {isCameraOpen && (
+                    <div className="image-camera-panel">
+                      {cameraDevices.length > 1 && (
+                        <label className="offer-filter image-camera-selector">
+                          Camera
+                          <select
+                            value={activeCameraId}
+                            onChange={(event) => void startCamera(event.target.value)}
+                            aria-label="Select camera"
+                          >
+                            {cameraDevices.map((device, index) => (
+                              <option key={device.deviceId} value={device.deviceId}>
+                                {device.label || `Camera ${index + 1}`}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                      <video
+                        ref={cameraVideoRef}
+                        className="image-camera-preview"
+                        autoPlay
+                        muted
+                        playsInline
+                        aria-label="Live camera preview"
+                      />
+                      <div className="image-camera-controls">
+                        <button
+                          className="hero-button"
+                          type="button"
+                          onClick={capturePhoto}
+                        >
+                          Capture Photo
+                        </button>
+                        <button
+                          className="text-button"
+                          type="button"
+                          onClick={stopCamera}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   {selectedImage && (
                     <div className="image-preview">
                       {imagePreviewUrl && (
@@ -3352,14 +3570,26 @@ function App() {
                           {(selectedImage.size / (1024 * 1024)).toFixed(2)} MiB
                         </span>
                       </div>
-                      <button
-                        className="text-button image-remove-button"
-                        type="button"
-                        onClick={clearImageSelection}
-                        disabled={imageSearchLoading}
-                      >
-                        Remove image
-                      </button>
+                      <div className="image-preview-actions">
+                        {isCapturedImage && (
+                          <button
+                            className="text-button"
+                            type="button"
+                            onClick={() => void startCamera(activeCameraId)}
+                            disabled={imageSearchLoading}
+                          >
+                            Retake
+                          </button>
+                        )}
+                        <button
+                          className="text-button image-remove-button"
+                          type="button"
+                          onClick={clearImageSelection}
+                          disabled={imageSearchLoading}
+                        >
+                          Remove image
+                        </button>
+                      </div>
                     </div>
                   )}
 
