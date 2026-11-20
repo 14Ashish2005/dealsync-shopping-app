@@ -2416,21 +2416,6 @@ function App() {
             ))}
           </nav>
 
-          <div className="sidebar-bottom">
-            <div className="help-card">
-              <div className="help-icon">?</div>
-              <strong>Shopping made smarter</strong>
-              <p>Discover better products with AI-powered assistance.</p>
-            </div>
-            <div className="profile">
-              <div className="avatar">G</div>
-              <div className="profile-info">
-                <strong>{authStatus === 'authenticated' ? 'Signed in' : 'Guest user'}</strong>
-                <span>{authStatus === 'authenticated' ? 'Google account' : 'Cart sign-in required'}</span>
-              </div>
-              <span className="profile-menu">???</span>
-            </div>
-          </div>
         </aside>
 
         <main className="main-area">
@@ -4004,21 +3989,6 @@ function App() {
           ))}
         </nav>
 
-        <div className="sidebar-bottom">
-          <div className="help-card">
-            <div className="help-icon">✦</div>
-            <strong>Shopping made smarter</strong>
-            <p>Discover better products with AI-powered assistance.</p>
-          </div>
-          <div className="profile">
-            <div className="avatar">G</div>
-            <div className="profile-info">
-              <strong>{authStatus === 'authenticated' ? 'Signed in' : 'Guest user'}</strong>
-              <span>{authStatus === 'authenticated' ? 'Google account' : 'Cart sign-in required'}</span>
-            </div>
-            <span className="profile-menu">•••</span>
-          </div>
-        </div>
       </aside>
 
       <main className="main-area">
