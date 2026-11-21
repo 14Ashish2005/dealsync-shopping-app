@@ -39,10 +39,19 @@ async function readApiResponse(response, requestName) {
         : `${requestName} failed (HTTP ${response.status}).`,
     )
     error.status = response.status
+    error.retryAfter = response.headers.get('Retry-After')
     throw error
   }
 
   return data
+}
+
+function parseRetryAfterSeconds(value) {
+  const retryAfter = typeof value === 'string' ? value.trim() : ''
+  if (!/^\d+$/.test(retryAfter)) return null
+
+  const seconds = Number(retryAfter)
+  return Number.isSafeInteger(seconds) && seconds > 0 ? seconds : null
 }
 
 function isSmartSearchResponse(data) {
@@ -1100,6 +1109,8 @@ function App() {
   const [imageOrganic, setImageOrganic] = useState('')
   const [imageSearchLoading, setImageSearchLoading] = useState(false)
   const [imageSearchError, setImageSearchError] = useState('')
+  const [imageSearchRetrySeconds, setImageSearchRetrySeconds] = useState(0)
+  const [imageSearchRetryUntil, setImageSearchRetryUntil] = useState(0)
   const [imageSearchResult, setImageSearchResult] = useState(null)
   const [imageSearchSearched, setImageSearchSearched] = useState(false)
   const imageFileInputRef = useRef(null)
@@ -1164,6 +1175,26 @@ function App() {
       setCameraError('Camera preview could not start. Check your browser permissions and try again.')
     })
   }, [isCameraOpen])
+
+  useEffect(() => {
+    if (!imageSearchRetryUntil) return undefined
+
+    const updateCountdown = () => {
+      const secondsRemaining = Math.max(
+        0,
+        Math.ceil((imageSearchRetryUntil - Date.now()) / 1000),
+      )
+      setImageSearchRetrySeconds(secondsRemaining)
+      if (secondsRemaining === 0) {
+        setImageSearchRetryUntil(0)
+        setImageSearchError('')
+      }
+    }
+
+    updateCountdown()
+    const intervalId = window.setInterval(updateCountdown, 1000)
+    return () => window.clearInterval(intervalId)
+  }, [imageSearchRetryUntil])
 
   useLayoutEffect(() => {
     if (activeNav !== 'Products' || !pendingOfferSearchScrollRef.current) return
@@ -1936,7 +1967,7 @@ function App() {
 
     async function searchByImage(event) {
       event.preventDefault()
-      if (imageSearchInFlightRef.current) return
+      if (imageSearchInFlightRef.current || imageSearchRetrySeconds > 0) return
       if (!selectedImage) {
         setImageSearchError('Choose an image before starting the search.')
         return
@@ -1967,6 +1998,8 @@ function App() {
       imageSearchInFlightRef.current = true
       setImageSearchLoading(true)
       setImageSearchError('')
+      setImageSearchRetrySeconds(0)
+      setImageSearchRetryUntil(0)
       setImageSearchResult(null)
       setImageSearchSearched(false)
 
@@ -2009,7 +2042,16 @@ function App() {
         } else if (error.status === 413) {
           setImageSearchError('The image must be no larger than 10 MiB.')
         } else if (error.status === 429) {
-          setImageSearchError('Image search rate limit reached. Try again later.')
+          const retryAfterSeconds = parseRetryAfterSeconds(error.retryAfter)
+          setImageSearchError(
+            retryAfterSeconds === null
+              ? "You've reached your image search limit. Please try again later."
+              : "You've reached your image search limit.",
+          )
+          if (retryAfterSeconds !== null) {
+            setImageSearchRetrySeconds(retryAfterSeconds)
+            setImageSearchRetryUntil(Date.now() + retryAfterSeconds * 1000)
+          }
         } else if (error.status === 502) {
           setImageSearchError('Image analysis or provider search failed.')
         } else if (error.status === 503) {
@@ -3660,6 +3702,7 @@ function App() {
                       type="submit"
                       disabled={
                         imageSearchLoading ||
+                        imageSearchRetrySeconds > 0 ||
                         !selectedImage ||
                         authStatus !== 'authenticated'
                       }
@@ -3697,9 +3740,11 @@ function App() {
                       </button>
                     </div>
                   )}
-                  {imageSearchError && (
+                  {(imageSearchError || imageSearchRetrySeconds > 0) && (
                     <p className="image-search-error" role="alert">
-                      {imageSearchError}
+                      {imageSearchRetrySeconds > 0
+                        ? `You've reached your image search limit. Try again in ${Math.floor(imageSearchRetrySeconds / 60)} min ${imageSearchRetrySeconds % 60} sec.`
+                        : imageSearchError}
                     </p>
                   )}
                   {imageSearchLoading && (

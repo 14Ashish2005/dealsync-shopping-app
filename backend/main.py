@@ -338,7 +338,7 @@ IMAGE_UPLOAD_PARSE_MAX_ADMITTED = 4
 VISION_WORKER_COUNT = 2
 VISION_MAX_ADMITTED = 4
 VISION_OUTER_DEADLINE_SECONDS = 35.0
-VISION_RATE_LIMIT_REQUESTS = 5
+VISION_RATE_LIMIT_REQUESTS = 10
 VISION_RATE_LIMIT_WINDOW_SECONDS = 15 * 60
 VISION_RATE_LIMIT_MAX_USERS = 4096
 
@@ -598,21 +598,36 @@ class _PerUserRateLimiter:
             if not timestamps:
                 del self._requests[owner_id]
 
-    def allow(self, owner_id: str) -> bool:
+    def try_acquire(self, owner_id: str) -> int | None:
         now = time.monotonic()
         with self._lock:
             self._remove_expired(now)
             timestamps = self._requests.get(owner_id)
             if timestamps is None:
                 if len(self._requests) >= self._max_users:
-                    return False
+                    oldest_active = min(
+                        active[0]
+                        for active in self._requests.values()
+                        if active
+                    )
+                    return max(
+                        1,
+                        math.ceil(
+                            oldest_active + self._window_seconds - now
+                        ),
+                    )
                 timestamps = deque()
                 self._requests[owner_id] = timestamps
             if len(timestamps) >= self._max_requests:
-                return False
+                return max(
+                    1,
+                    math.ceil(
+                        timestamps[0] + self._window_seconds - now
+                    ),
+                )
             timestamps.append(now)
             self._requests.move_to_end(owner_id)
-            return True
+            return None
 
 def _validate_database_schema(
     engine: Engine,
@@ -1574,12 +1589,6 @@ async def api_offer_search_by_image(
             status_code=503,
             detail="Visual discovery service is unavailable.",
         )
-    if not rate_limiter.allow(owner_id):
-        raise HTTPException(
-            status_code=429,
-            detail="Visual search rate limit exceeded.",
-        )
-
     vision_executor = getattr(
         request.app.state,
         "visual_request_executor",
@@ -1677,6 +1686,14 @@ async def api_offer_search_by_image(
                 status_code=400,
                 detail="The uploaded file is not a valid supported image.",
             ) from None
+
+        retry_after = rate_limiter.try_acquire(owner_id)
+        if retry_after is not None:
+            raise HTTPException(
+                status_code=429,
+                detail="Visual search rate limit exceeded.",
+                headers={"Retry-After": str(retry_after)},
+            )
 
         try:
             request_admission = vision_executor.reserve()

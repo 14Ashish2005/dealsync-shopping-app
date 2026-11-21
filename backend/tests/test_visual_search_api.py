@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from contextlib import closing
 from io import BytesIO
 from pathlib import Path
-from threading import Event, Thread
+from threading import Barrier, Event, Thread
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -127,7 +127,7 @@ class VisualSearchApiTests(unittest.TestCase):
             ),
         )
         setattr(self.main, "VISION_OUTER_DEADLINE_SECONDS", 35.0)
-        setattr(self.main, "VISION_RATE_LIMIT_REQUESTS", 5)
+        setattr(self.main, "VISION_RATE_LIMIT_REQUESTS", 10)
         prepare_test_schemas(self.database_path, self.auth_path)
 
         self.analyzer = FakeAnalyzer()
@@ -1087,19 +1087,118 @@ class VisualSearchApiTests(unittest.TestCase):
         self.assertEqual(first.status_code, 200)
         repeated = [self._post() for _ in range(20)]
         self.assertTrue(all(response.status_code == 429 for response in repeated))
+        self.assertTrue(
+            all(
+                1 <= int(response.headers["Retry-After"]) <= 15 * 60
+                for response in repeated
+            )
+        )
         tracked = self.main.app.state.visual_search_rate_limiter._requests
         self.assertEqual(tuple(tracked), ("test-owner",))
         self.assertEqual(len(tracked["test-owner"]), 1)
 
-        self.main.app.state.visual_search_rate_limiter._max_requests = 5
+        self.main.app.state.visual_search_rate_limiter._max_requests = 10
         executor = self.main.app.state.visual_request_executor
         reservations = [executor.reserve() for _ in range(4)]
         try:
             overloaded = self._post()
             self.assertEqual(overloaded.status_code, 503)
+            self.assertEqual(
+                len(
+                    self.main.app.state.visual_search_rate_limiter._requests[
+                        "test-owner"
+                    ]
+                ),
+                2,
+            )
         finally:
             for reservation in reservations:
                 reservation.release_if_unsubmitted()
+
+    def test_ten_searches_are_allowed_and_the_eleventh_is_limited(self) -> None:
+        responses = [
+            self._post(data={"provider_key": "local_catalog"})
+            for _ in range(10)
+        ]
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+
+        limited = self._post(data={"provider_key": "local_catalog"})
+        self.assertEqual(limited.status_code, 429)
+        self.assertEqual(
+            limited.json(),
+            {"detail": "Visual search rate limit exceeded."},
+        )
+        self.assertIn("Retry-After", limited.headers)
+
+    def test_rate_limit_response_uses_limiter_retry_after_value(self) -> None:
+        limiter = self.main.app.state.visual_search_rate_limiter
+        with patch.object(limiter, "try_acquire", return_value=37):
+            response = self._post(data={"provider_key": "local_catalog"})
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.headers["Retry-After"], "37")
+
+    def test_retry_after_uses_oldest_request_and_expires_at_window_edge(self) -> None:
+        now = [100.0]
+        limiter = self.main._PerUserRateLimiter(
+            max_requests=2,
+            window_seconds=10,
+            max_users=2,
+        )
+        with patch.object(
+            self.main.time,
+            "monotonic",
+            side_effect=lambda: now[0],
+        ):
+            self.assertIsNone(limiter.try_acquire("owner-a"))
+            now[0] = 105.0
+            self.assertIsNone(limiter.try_acquire("owner-a"))
+            now[0] = 107.0
+            self.assertEqual(limiter.try_acquire("owner-a"), 3)
+            now[0] = 110.0
+            self.assertIsNone(limiter.try_acquire("owner-a"))
+
+    def test_invalid_uploads_do_not_consume_quota_but_valid_searches_do(self) -> None:
+        malformed = self._post_raw_multipart(b"not a multipart body", "bad")
+        wrong_type = self._post(media_type="text/plain")
+        oversized = self._post(
+            image=b"x" * (self.main.MAX_UPLOAD_SIZE_BYTES + 1)
+        )
+        invalid_content = self._post(image=b"not a valid image")
+
+        self.assertEqual(malformed.status_code, 400)
+        self.assertEqual(wrong_type.status_code, 400)
+        self.assertEqual(oversized.status_code, 413)
+        self.assertEqual(invalid_content.status_code, 400)
+        limiter = self.main.app.state.visual_search_rate_limiter
+        self.assertFalse(limiter._requests.get("test-owner"))
+
+        valid = self._post(data={"provider_key": "local_catalog"})
+        self.assertEqual(valid.status_code, 200)
+        self.assertEqual(len(limiter._requests["test-owner"]), 1)
+
+    def test_concurrent_requests_cannot_exceed_user_limit(self) -> None:
+        limiter = self.main._PerUserRateLimiter(
+            max_requests=10,
+            window_seconds=15 * 60,
+            max_users=2,
+        )
+        barrier = Barrier(24)
+        results: list[int | None] = []
+
+        def acquire() -> None:
+            barrier.wait(timeout=5)
+            results.append(limiter.try_acquire("owner-a"))
+
+        threads = [Thread(target=acquire) for _ in range(24)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(sum(result is None for result in results), 10)
+        self.assertEqual(sum(result is not None for result in results), 14)
 
     def test_rate_limiter_expiry_and_tracked_user_cap(self) -> None:
         now = [100.0]
@@ -1113,11 +1212,11 @@ class VisualSearchApiTests(unittest.TestCase):
                 window_seconds=10,
                 max_users=2,
             )
-            self.assertTrue(expiring.allow("owner-a"))
+            self.assertIsNone(expiring.try_acquire("owner-a"))
             now[0] = 109.0
-            self.assertFalse(expiring.allow("owner-a"))
+            self.assertEqual(expiring.try_acquire("owner-a"), 1)
             now[0] = 110.0
-            self.assertTrue(expiring.allow("owner-a"))
+            self.assertIsNone(expiring.try_acquire("owner-a"))
 
             now[0] = 200.0
             bounded = self.main._PerUserRateLimiter(
@@ -1126,17 +1225,17 @@ class VisualSearchApiTests(unittest.TestCase):
                 max_users=2,
             )
             accepted = [
-                bounded.allow("owner-a")
+                bounded.try_acquire("owner-a") is None
                 for _ in range(20)
             ]
             self.assertEqual(sum(accepted), 2)
-            self.assertTrue(bounded.allow("owner-b"))
-            self.assertFalse(bounded.allow("owner-c"))
+            self.assertIsNone(bounded.try_acquire("owner-b"))
+            self.assertIsNotNone(bounded.try_acquire("owner-c"))
             self.assertEqual(len(bounded._requests), 2)
             self.assertLessEqual(len(bounded._requests["owner-a"]), 2)
 
             now[0] = 210.0
-            self.assertTrue(bounded.allow("owner-c"))
+            self.assertIsNone(bounded.try_acquire("owner-c"))
             self.assertEqual(tuple(bounded._requests), ("owner-c",))
 
     def test_submission_failure_releases_admission_exactly_once(self) -> None:
